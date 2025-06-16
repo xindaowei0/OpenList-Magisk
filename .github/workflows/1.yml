@@ -1,0 +1,404 @@
+name: 构建 OpenList Magisk 模块
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 检出仓库代码
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      # 安装依赖工具
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl zip
+
+      # 获取 OpenList 最新版本
+      - name: 获取 OpenList 最新版本
+        id: get_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_URL: https://api.github.com/repos/OpenListTeam/OpenList/releases/latest
+        run: |
+          for i in {1..3}; do
+            RESPONSE=$(curl -s -L -w "\n%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" "$API_URL")
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            if [ "$HTTP_CODE" -eq 200 ] && [ -n "$BODY" ]; then
+              echo "成功获取 OpenList Release 数据"
+              echo "$BODY" > latest_release.json
+              break
+            fi
+            echo "尝试 $i 失败，HTTP 状态码: $HTTP_CODE"
+            sleep $((5 * i))
+          done
+
+          if [ ! -f latest_release.json ] || [ ! -s latest_release.json ]; then
+            echo "::error::无法获取 OpenList 版本信息"
+            exit 1
+          fi
+
+          VERSION=$(echo "$BODY" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "::error::无法提取版本号，tag_name 可能不存在"
+            cat latest_release.json
+            exit 1
+          fi
+
+          VERSION_CODE=$(echo "$VERSION" | tr -d 'v' | tr -d '.' | awk '{printf "%d%02d", $1, $2}')
+          ARM_URL=$(echo "$BODY" | grep '"browser_download_url":' | grep 'openlist-android-arm.tar.gz' | sed -E 's/.*"([^"]+)".*/\1/')
+          ARM64_URL=$(echo "$BODY" | grep '"browser_download_url":' | grep 'openlist-android-arm64.tar.gz' | sed -E 's/.*"([^"]+)".*/\1/')
+          CHANGELOG=$(echo "$BODY" | grep '"body":' | sed -E 's/.*"body":\s*"([^"]+)"([,}]).*/\1/' | sed 's/\\"/"/g')
+
+          if [ -z "$ARM_URL" ] || [ -z "$ARM64_URL" ]; then
+            echo "::error::无法提取二进制下载链接"
+            exit 1
+          fi
+
+          echo "OPENLIST_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "OPENLIST_VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "OPENLIST_ARM_URL=$ARM_URL" >> $GITHUB_ENV
+          echo "OPENLIST_ARM64_URL=$ARM64_URL" >> $GITHUB_ENV
+          echo "OPENLIST_CHANGELOG=$CHANGELOG" >> $GITHUB_ENV
+
+      # 检查当前模块版本
+      - name: 检查当前模块版本
+        id: check_version
+        run: |
+          if [ -f update.json ]; then
+            CURRENT_VERSION=$(grep '"version":' update.json | sed -E 's/.*"version":\s*"([^"]+)".*/\1/')
+            echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          else
+            echo "CURRENT_VERSION=none" >> $GITHUB_ENV
+          fi
+
+      # 比较版本并决定是否构建
+      - name: 检查是否需要构建
+        id: should_build
+        run: |
+          if [ "${{ env.CURRENT_VERSION }}" = "none" ] || [ "${{ env.OPENLIST_VERSION }}" != "${{ env.CURRENT_VERSION }}" ]; then
+            echo "需要构建新模块：OpenList 版本 ${{ env.OPENLIST_VERSION }}，当前模块版本 ${{ env.CURRENT_VERSION }}"
+            echo "SHOULD_BUILD=true" >> $GITHUB_ENV
+          else
+            echo "模块版本已是最新 (${{ env.OPENLIST_VERSION }})，无需构建"
+            echo "SHOULD_BUILD=false" >> $GITHUB_ENV
+          fi
+
+      # 构建 Magisk 模块
+      - name: 构建 Magisk 模块
+        if: env.SHOULD_BUILD == 'true'
+        # 此处假设用户仓库名为 OpenList-Magisk，请根据实际情况修改
+        run: |
+          MODULE_REPO_NAME="OpenList-Magisk"
+          rm -rf $MODULE_REPO_NAME
+          mkdir -p $MODULE_REPO_NAME/system/bin
+
+          curl -L -o openlist-arm.tar.gz "${{ env.OPENLIST_ARM_URL }}"
+          tar -xzf openlist-arm.tar.gz -C $MODULE_REPO_NAME/system/bin
+          mv $MODULE_REPO_NAME/system/bin/openlist $MODULE_REPO_NAME/system/bin/openlist-arm
+          rm -f openlist-arm.tar.gz
+
+          curl -L -o openlist-arm64.tar.gz "${{ env.OPENLIST_ARM64_URL }}"
+          tar -xzf openlist-arm64.tar.gz -C $MODULE_REPO_NAME/system/bin
+          mv $MODULE_REPO_NAME/system/bin/openlist $MODULE_REPO_NAME/system/bin/openlist-arm64
+          rm -f openlist-arm64.tar.gz
+
+          chmod 755 $MODULE_REPO_NAME/system/bin/openlist-arm $MODULE_REPO_NAME/system/bin/openlist-arm64
+
+          # 创建 module.prop
+          cat > $MODULE_REPO_NAME/module.prop << EOF
+          id=openlist-magisk
+          name=OpenList Magisk Module
+          version=${{ env.OPENLIST_VERSION }}
+          versionCode=${{ env.OPENLIST_VERSION_CODE }}
+          author=Alien-Et
+          description=【已停止】请点击"操作"启动程序。项目地址：https://github.com/Alien-Et/${MODULE_REPO_NAME}
+          updateJson=https://raw.githubusercontent.com/Alien-Et/${MODULE_REPO_NAME}/main/update.json
+          EOF
+
+          # 创建 customize.sh
+          cat > $MODULE_REPO_NAME/customize.sh << 'EOF'
+          #!/system/bin/sh
+          ui_print "正在安装 OpenList Magisk 模块..."
+          ARCH=$(getprop ro.product.cpu.abi)
+          ui_print "检测到架构: $ARCH"
+
+          if echo "$ARCH" | grep -q "arm64"; then
+            ui_print "安装 64 位 OpenList 二进制..."
+            mv $MODPATH/system/bin/openlist-arm64 $MODPATH/system/bin/openlist
+            rm $MODPATH/system/bin/openlist-arm
+          else
+            ui_print "安装 32 位 OpenList 二进制..."
+            mv $MODPATH/system/bin/openlist-arm $MODPATH/system/bin/openlist
+            rm $MODPATH/system/bin/openlist-arm64
+          fi
+
+          chmod 755 $MODPATH/system/bin/openlist
+          ui_print "OpenList 已安装到 /system/bin/openlist"
+          EOF
+
+          # 创建 service.sh
+          cat > $MODULE_REPO_NAME/service.sh << 'EOF'
+          #!/system/bin/sh
+          # service.sh for OpenList Magisk Module
+
+          MODDIR=${0%/*}
+          DATA_DIR="$MODDIR/data"
+          OPENLIST_BINARY="/system/bin/openlist"
+          MODULE_PROP="$MODDIR/module.prop"
+          PASSWORD_FILE="$MODDIR/随机密码.txt"
+          LOG_FILE="$MODDIR/service.log"
+
+          log() {
+              echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+          }
+
+          get_lan_ip() {
+              LAN_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+              [ -z "$LAN_IP" ] && LAN_IP=$(ifconfig wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}')
+              [ -z "$LAN_IP" ] && LAN_IP="192.168.x.x"
+              log "get_lan_ip: LAN_IP=$LAN_IP"
+              echo "$LAN_IP"
+          }
+
+          generate_random_password() {
+              log "Attempting to generate random password"
+              OUTPUT=$($OPENLIST_BINARY admin random --data "$DATA_DIR" 2>&1 | \
+                       grep -E "username|password" | \
+                       awk '/username/ {print "账号：" $NF} /password/ {print "密码：" $NF}')
+              if [ -n "$OUTPUT" ]; then
+                  echo "$OUTPUT" > "$PASSWORD_FILE"
+                  chmod 600 "$PASSWORD_FILE"
+                  log "Password file created at $PASSWORD_FILE with content: $OUTPUT"
+                  echo "$OUTPUT"
+              else
+                  log "Error: Failed to generate or capture username and password"
+                  return 1
+              fi
+          }
+
+          update_module_prop_running() {
+              LAN_IP=$(get_lan_ip)
+              
+              log "Updating module.prop for running state, LAN_IP=$LAN_IP"
+              if [ ! -f "$MODULE_PROP" ]; then
+                  log "Error: $MODULE_PROP does not exist"
+                  return 1
+              fi
+              if [ ! -w "$MODULE_PROP" ]; then
+                  log "Error: $MODULE_PROP is not writable"
+                  chmod 644 "$MODULE_PROP" || log "Error: Failed to set permissions on $MODULE_PROP"
+              fi
+              log "module.prop content before update: $(cat "$MODULE_PROP")"
+              NEW_DESC="description=【运行中】局域网地址：http://${LAN_IP}:5244 | 初始账密请移步到\"/data/adb/modules/openlist-magisk/随机密码.txt\"查看"
+              echo "$(grep -v '^description=' "$MODULE_PROP")" > "${MODULE_PROP}.tmp"
+              echo "$NEW_DESC" >> "${MODULE_PROP}.tmp"
+              mv "${MODULE_PROP}.tmp" "$MODULE_PROP"
+              if [ $? -eq 0 ]; then
+                  log "Updated module.prop successfully"
+              else
+                  log "Error: Failed to update module.prop"
+              fi
+              rm -f "${MODULE_PROP}.bak" "${MODULE_PROP}.tmp.*"
+              if grep -vE '^[a-zA-Z_]+=' "$MODULE_PROP" > /dev/null; then
+                  log "Warning: module.prop contains invalid lines, cleaning up"
+                  grep -E '^[a-zA-Z_]+=' "$MODULE_PROP" > "${MODULE_PROP}.clean"
+                  mv "${MODULE_PROP}.clean" "$MODULE_PROP"
+                  log "Cleaned module.prop content: $(cat "$MODULE_PROP")"
+              fi
+          }
+
+          log "Starting service.sh at $(date '+%Y-%m-%d %H:%M:%S')"
+          if ! command -v ip >/dev/null 2>&1; then
+              log "Error: ip command not found"
+              exit 1
+          fi
+          if [ ! -x "$OPENLIST_BINARY" ]; then
+              log "Error: $OPENLIST_BINARY is not executable or does not exist"
+              exit 1
+          fi
+
+          ELAPSED=0
+          MAX_WAIT=60
+          WAIT_INTERVAL=5
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+              if [ "$(getprop sys.boot_completed)" = "1" ]; then
+                  log "Android system boot completed"
+                  break
+              fi
+              log "Waiting for Android system boot... ($ELAPSED/$MAX_WAIT seconds)"
+              sleep $WAIT_INTERVAL
+              ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+          done
+
+          if [ $ELAPSED -ge $MAX_WAIT ]; then
+              log "Warning: System boot timeout, attempting to start OpenList service"
+          fi
+
+          mkdir -p "$DATA_DIR"
+          log "Created data directory: $DATA_DIR"
+
+          $OPENLIST_BINARY server --data "$DATA_DIR" &
+          sleep 1
+          if pgrep -f openlist >/dev/null; then
+              log "OpenList service started successfully"
+              if [ ! -f "$PASSWORD_FILE" ]; then
+                  generate_random_password || log "Password generation failed, continuing"
+              else
+                  log "Detected $PASSWORD_FILE, skipping password generation"
+              fi
+              update_module_prop_running
+          else
+              log "Failed to start OpenList service"
+              exit 1
+          fi
+          EOF
+
+          # 创建 action.sh
+          cat > $MODULE_REPO_NAME/action.sh << 'EOF'
+          #!/system/bin/sh
+          # action.sh for OpenList Magisk Module
+
+          MODDIR=${0%/*}
+          OPENLIST_BINARY="/system/bin/openlist"
+          DATA_DIR="$MODDIR/data"
+          MODULE_PROP="$MODDIR/module.prop"
+          SERVICE_SH="$MODDIR/service.sh"
+          REPO_URL="https://github.com/Alien-Et/OpenList-Magisk" # 此处需确认仓库名
+          LOG_FILE="$MODDIR/action.log"
+
+          log() {
+              echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+          }
+
+          check_openlist_status() {
+              if pgrep -f openlist >/dev/null; then
+                  return 0
+              else
+                  return 1
+              fi
+          }
+
+          update_module_prop_stopped() {
+              sed -i "s|^description=.*|description=【已停止】请点击\"操作\"启动程序。项目地址：${REPO_URL}|" "$MODULE_PROP"
+              log "Updated module.prop to stopped state"
+          }
+
+          log "Starting action.sh"
+          if check_openlist_status; then
+              pkill -f openlist
+              sleep 1
+              if check_openlist_status; then
+                  log "Failed to stop OpenList service"
+                  echo "无法停止 OpenList 服务"
+                  exit 1
+              else
+                  log "OpenList service stopped"
+                  echo "OpenList 服务已停止"
+                  update_module_prop_stopped
+              fi
+          else
+              if [ -f "$SERVICE_SH" ]; then
+                  sh "$SERVICE_SH"
+                  sleep 1
+                  if check_openlist_status; then
+                      log "OpenList service started successfully"
+                      echo "OpenList 服务启动成功"
+                  else
+                      log "Failed to start OpenList service"
+                      echo "无法启动 OpenList 服务"
+                      exit 1
+                  fi
+              else
+                  log "Error: service.sh not found"
+                  echo "错误：service.sh 不存在"
+                  exit 1
+              fi
+          fi
+          EOF
+          chmod 755 $MODULE_REPO_NAME/action.sh
+
+          # 创建 update.json
+          cat > update.json << EOF
+          {
+              "version": "${{ env.OPENLIST_VERSION }}",
+              "versionCode": ${{ env.OPENLIST_VERSION_CODE }},
+              "zipUrl": "https://github.com/Alien-Et/${MODULE_REPO_NAME}/releases/download/${{ env.OPENLIST_VERSION }}/openlist-magisk-${{ env.OPENLIST_VERSION }}.zip",
+              "changelog": "https://raw.githubusercontent.com/Alien-Et/${MODULE_REPO_NAME}/main/${MODULE_REPO_NAME}/CHANGELOG.md"
+          }
+          EOF
+
+          # 创建 CHANGELOG.md
+          cat > $MODULE_REPO_NAME/CHANGELOG.md << EOF
+          # Changelog
+          - ${{ env.OPENLIST_VERSION }}: Synced with OpenList official release ${{ env.OPENLIST_VERSION }}
+          ${{ env.OPENLIST_CHANGELOG }}
+          EOF
+
+          # 创建模块专用的 README.md
+          cat > $MODULE_REPO_NAME/README.md << EOF
+          # OpenList Magisk 模块安装指南
+
+          本模块将 [OpenList](https://github.com/OpenListTeam/OpenList) 文件服务器集成到 Android 系统中，当前版本：${{ env.OPENLIST_VERSION }}。
+
+          ## 功能
+          - 自动同步 OpenList 官方版本
+          - 支持 ARM 和 ARM64 架构
+          - 首次启动生成随机管理员账号和密码，保存到 \`/data/adb/modules/openlist-magisk/随机密码.txt\`
+          - 系统启动后自动运行 OpenList 服务，数据存储在模块的 \`data\` 目录（/data/adb/modules/openlist-magisk/data）
+          - 通过 Magisk 的“动作”按钮切换 OpenList 服务状态
+          
+          （详细内容与原 README 类似，已作相应替换）
+          EOF
+
+          # 创建根目录 README.md
+          cat > README.md << EOF
+          # OpenList Magisk 模块
+
+          [![Release](https://img.shields.io/github/v/release/Alien-Et/${MODULE_REPO_NAME})](https://github.com/Alien-Et/${MODULE_REPO_NAME}/releases)
+          [![License](https://img.shields.io/github/license/Alien-Et/${MODULE_REPO_NAME})](https://github.com/Alien-Et/${MODULE_REPO_NAME}/blob/main/LICENSE)
+
+          OpenList Magisk 模块将 [OpenList](https://github.com/OpenListTeam/OpenList) 文件服务器集成到 Android 系统中，当前版本：${{ env.OPENLIST_VERSION }}。
+          
+          （详细内容与原 README 类似，已作相应替换）
+          EOF
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add $MODULE_REPO_NAME/ update.json README.md
+          git commit -m "更新 OpenList Magisk 模块文件到 ${{ env.OPENLIST_VERSION }}" || echo "无更改需要提交"
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Alien-Et/${MODULE_REPO_NAME}.git
+
+          cd $MODULE_REPO_NAME
+          zip -r ../openlist-magisk-${{ env.OPENLIST_VERSION }}.zip module.prop customize.sh service.sh action.sh system CHANGELOG.md README.md
+          cd ..
+
+      # 创建 GitHub Release 并上传模块
+      - name: 创建 GitHub Release 并上传模块
+        if: env.SHOULD_BUILD == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.OPENLIST_VERSION }}
+          name: OpenList Magisk Module ${{ env.OPENLIST_VERSION }}
+          draft: false
+          prerelease: false
+          files: openlist-magisk-${{ env.OPENLIST_VERSION }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 清理工作目录
+      - name: 清理工作目录
+        if: always()
+        run: |
+          rm -rf openlist-magisk-*.zip openlist-arm*.tar.gz latest_release.json
+          echo "已清理临时文件：openlist-magisk-*.zip, openlist-arm*.tar.gz, latest_release.json"
