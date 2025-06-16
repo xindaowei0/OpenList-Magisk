@@ -1,1 +1,1 @@
-# OpenList-for-Android
+# 这是一个OpenList magisk模块。使用工作流自动同步官方最新版本二进制！由于openlist官方目前只是测试版，没有版本号，所以工作流自动构建失败！！！等官方二进制程序有版本号后，此仓库会自动构建README.md和magisk模块！！
