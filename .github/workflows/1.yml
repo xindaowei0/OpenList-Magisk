@@ -321,7 +321,7 @@ jobs:
                       log "OpenList service started successfully"
                       echo "OpenList 服务启动成功"
                   else
-                      log "Failed to start OpenList service"
+                      log "Failed to start OpenOpenList service"
                       echo "无法启动 OpenList 服务"
                       exit 1
                   fi
@@ -402,7 +402,7 @@ jobs:
           - **服务管理**：
             - OpenList 服务在系统启动完成后自动运行（通过 service.sh），模块描述显示：
               \`\`\`
-              【运行中】局域网地址：http://<设备IP>:5244 项目地址：https://github.com/Alien-Et/OpenList-Magisk | 初始账密请移步到"/data/adb/modules/openlist-magisk/随机密码.txt"查看
+              【运行中】局域网地址：http://<设备IP>:5244 项目地址：https://github.com/Alien-Et/OpenList-Magisk | 初始账号：xxx | 初始密码：xxx（仅未手动修改时有效）
               \`\`\`
             - 在 Magisk 应用中点击“动作”按钮：
               - 如果 OpenList 服务正在运行，点击停止服务，模块描述更新为：
