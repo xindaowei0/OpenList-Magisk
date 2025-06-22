@@ -122,8 +122,8 @@ jobs:
 
           chmod 755 OpenList-Magisk/system/bin/openlist-arm OpenList-Magisk/system/bin/openlist-arm64
 
-      # 更新 update.json 和 CHANGELOG.md
-      - name: 更新 update.json 和 CHANGELOG.md
+      # 更新 update.json、CHANGELOG.md 和 module.prop
+      - name: 更新 update.json、CHANGELOG.md 和 module.prop
         if: env.SHOULD_BUILD == 'true'
         run: |
           # 更新 update.json
@@ -143,11 +143,20 @@ jobs:
           ${{ env.OPENLIST_CHANGELOG }}
           EOF
 
-          # 提交更改（不再提交二进制文件）
+          # 更新 module.prop 的 version 和 versionCode
+          if [ -f OpenList-Magisk/module.prop ]; then
+            sed -i "s/^version=.*/version=${{ env.OPENLIST_VERSION }}/" OpenList-Magisk/module.prop
+            sed -i "s/^versionCode=.*/versionCode=${{ env.OPENLIST_VERSION_CODE }}/" OpenList-Magisk/module.prop
+          else
+            echo "::error::module.prop 文件不存在"
+            exit 1
+          fi
+
+          # 提交更改（不提交二进制文件）
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add update.json OpenList-Magisk/CHANGELOG.md
-          git commit -m "更新 update.json、CHANGELOG.md 到 ${{ env.OPENLIST_VERSION }}" || echo "无更改需要提交"
+          git add update.json OpenList-Magisk/CHANGELOG.md OpenList-Magisk/module.prop
+          git commit -m "更新 update.json、CHANGELOG.md 和 module.prop 到 ${{ env.OPENLIST_VERSION }}" || echo "无更改需要提交"
           git push origin main
 
       # 打包 Magisk 模块
