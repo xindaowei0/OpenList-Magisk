@@ -1,0 +1,244 @@
+name: 更新 README 文档
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write  # 允许推送代码
+  actions: read    # 允许读取 Actions 状态
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 检出仓库代码
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      # 安装依赖工具
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl
+
+      # 获取 OpenList 最新版本
+      - name: 获取 OpenList 最新版本
+        id: get_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_URL: https://api.github.com/repos/OpenListTeam/OpenList/releases/latest
+        run: |
+          for i in {1..3}; do
+            RESPONSE=$(curl -s -L -w "\n%{http_code}" -H "Authorization: Bearer $GITHUB_TOKEN" "$API_URL")
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            if [ "$HTTP_CODE" -eq 200 ] && [ -n "$BODY" ]; then
+              echo "成功获取 OpenList Release 数据"
+              echo "$BODY" > latest_release.json
+              break
+            fi
+            echo "尝试 $i 失败，HTTP 状态码: $HTTP_CODE"
+            sleep $((5 * i))
+          done
+
+          if [ ! -f latest_release.json ] || [ ! -s latest_release.json ]; then
+            echo "::error::无法获取 OpenList 版本信息"
+            exit 1
+          fi
+
+          VERSION=$(echo "$BODY" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "::error::无法提取版本号，tag_name 可能不存在"
+            cat latest_release.json
+            exit 1
+          fi
+
+          VERSION_CODE=$(echo "$VERSION" | tr -d 'v' | tr -d '.' | awk '{printf "%d%02d", $1, $2}')
+          CHANGELOG=$(echo "$BODY" | grep '"body":' | sed -E 's/.*"body":\s*"([^"]+)"([,}]).*/\1/' | sed 's/\\"/"/g')
+
+          echo "OPENLIST_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "OPENLIST_VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "OPENLIST_CHANGELOG=$CHANGELOG" >> $GITHUB_ENV
+
+      # 检查当前 README 版本
+      - name: 检查当前 README 版本
+        id: check_version
+        run: |
+          if [ -f README.md ]; then
+            CURRENT_VERSION=$(grep -oP '(?<=**版本**: )\S+' README.md || echo "none")
+            echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          else
+            echo "CURRENT_VERSION=none" >> $GITHUB_ENV
+          fi
+
+      # 比较版本并决定是否更新
+      - name: 检查是否需要更新
+        id: should_update
+        run: |
+          if [ "${{ env.CURRENT_VERSION }}" = "none" ] || [ "${{ env.OPENLIST_VERSION }}" != "${{ env.CURRENT_VERSION }}" ]; then
+            echo "需要更新 README：OpenList 版本 ${{ env.OPENLIST_VERSION }}，当前 README 版本 ${{ env.CURRENT_VERSION }}"
+            echo "SHOULD_UPDATE=true" >> $GITHUB_ENV
+          else
+            echo "README 版本已是最新 (${{ env.OPENLIST_VERSION }})，无需更新"
+            echo "SHOULD_UPDATE=false" >> $GITHUB_ENV
+          fi
+
+      # 更新 README.md
+      - name: 更新 README.md
+        if: env.SHOULD_UPDATE == 'true'
+        run: |
+          # 生成 README.md
+          cat > README.md << EOF
+          # OpenList Magisk 模块
+
+          **版本**: ${{ env.OPENLIST_VERSION }}（同步 OpenList 官方版本）
+
+          本项目提供一个 Magisk 模块，用于将 [OpenList](https://github.com/OpenListTeam/OpenList) 文件服务器集成到 Android 系统中，通过 Magisk 提供系统化的运行支持。模块支持 ARM 和 ARM64 架构，自动同步 OpenList 官方最新版本，并提供服务管理和动态状态更新功能。
+
+          ## 功能特性
+          - **自动同步 OpenList 版本**：模块与 OpenList 官方最新版本保持一致，自动下载最新二进制文件。
+          - **架构适配**：支持 ARM 和 ARM64 设备，安装时自动选择合适的二进制文件。
+          - **服务管理**：通过 Magisk 的“动作”按钮启动或停止 OpenList 服务。
+          - **密码管理**：首次启动生成随机管理员账号和密码，保存到 \`/data/adb/modules/openlist-magisk/随机密码.txt\`。
+          - **动态状态**：模块描述动态显示服务状态（运行中/已停止）和访问地址（如 \`http://<IP>:5244\`）。
+          - **自动化构建**：GitHub Actions 工作流每 4 小时检查 OpenList 新版本，自动更新模块。
+
+          ## 安装方法
+          1. **下载模块**：
+             - 访问 [Releases](${{ github.server_url }}/${{ github.repository }}/releases) 页面，下载最新的 \`openlist-magisk-${{ env.OPENLIST_VERSION }}.zip\`。
+          2. **安装 Magisk 模块**：
+             - 打开 Magisk 应用，进入 “模块” 页面，点击 “从本地安装”。
+             - 选择下载的 ZIP 文件，安装并重启设备。
+          3. **验证安装**：
+             - 重启后，检查 \`/data/adb/modules/openlist-magisk/随机密码.txt\`，获取管理员账号和密码。
+             - 在浏览器访问 \`http://<设备IP>:5244\`，使用生成的账号密码登录。
+          4. **服务管理**：
+             - 在 Magisk 应用中，点击模块的 “动作” 按钮，可启动或停止 OpenList 服务。
+             - 服务运行时，模块描述会更新为包含访问地址和密码文件提示。
+
+          ## 脚本功能说明
+          模块目录 \`OpenList-Magisk/\` 包含以下脚本，各自功能如下：
+
+          - **\`customize.sh\`**：
+            - **作用**：Magisk 模块安装脚本，在模块安装时运行。
+            - **功能**：
+              - 检测设备架构（ARM 或 ARM64）。
+              - 根据架构选择对应的二进制文件（\`openlist-arm\` 或 \`openlist-arm64\`），重命名为 \`/system/bin/openlist\`。
+              - 删除不适用的二进制文件，优化模块大小。
+              - 设置二进制文件权限为 \`755\`（可执行）。
+            - **执行时机**：模块安装或更新时，由 Magisk 执行。
+
+          - **\`service.sh\`**：
+            - **作用**：系统启动后运行的脚本，负责启动 OpenList 服务并管理账号密码。
+            - **功能**：
+              - 等待系统启动完成（最多 60 秒）。
+              - 创建数据目录 \`/data/adb/modules/openlist-magisk/data\`。
+              - 启动 OpenList 服务（\`openlist server --data\`）。
+              - 如果密码 file（\`随机密码.txt\`）不存在，调用 \`openlist admin random\` 生成随机管理员账号和密码，保存到 \`/data/adb/modules/openlist-magisk/随机密码.txt\`（权限 \`600\`）。
+              - 更新 \`module.prop\` 的描述，显示服务状态和访问地址（如 \`http://<IP>:5244\`）。
+              - 记录服务日志到 \`/data/adb/modules/openlist-magisk/service.log\`。
+            - **执行时机**：系统启动时（\`late_start service\` 模式）或通过 \`action.sh\` 触发。
+
+          - **\`action.sh\`**：
+            - **作用**：提供 Magisk 应用中“动作”按钮的功能，允许用户手动控制 OpenList 服务。
+            - **功能**：
+              - **启动服务**：运行 \`service.sh\` 启动 OpenList 服务。
+              - **停止服务**：杀死 OpenList 进程（\`pkill -f openlist\`）。
+              - **状态更新**：根据服务状态更新 \`module.prop\` 的描述（“运行中”或“已停止”）。
+            - **执行时机**：用户在 Magisk 应用中点击模块的 “动作” 按钮时。
+
+          - **\`META-INF/com/google/android/update-binary\`**：
+            - **作用**：Magisk 模块安装的入口脚本，由 Magisk 刷机流程调用。
+            - **功能**：
+              - 设置安装环境，调用 \`customize.sh\` 执行模块安装逻辑。
+              - 确保模块文件正确部署到 \`/data/adb/modules/openlist-magisk\`。
+            - **执行时机**：模块通过 Magisk 刷入时。
+
+          - **\`META-INF/com/google/android/updater-script\`**：
+            - **作用**：Magisk 模块的刷机脚本，定义模块安装的元数据和流程。
+            - **功能**：
+              - 提供模块安装的 UI 提示（显示在 TWRP 或 Magisk 刷机界面）。
+              - 调用 \`update-binary\` 执行实际安装逻辑。
+            - **执行时机**：模块刷入时，由恢复模式或 Magisk 解析。
+
+          ## 分叉和使用工作流
+          如果你想分叉本仓库并自行构建模块，请按照以下步骤操作：
+
+          1. **分叉仓库**：
+             - 点击 GitHub 页面右上角的 “Fork” 按钮，将仓库分叉到你的账户。
+          2. **启用 GitHub Actions**：
+             - 进入分叉仓库，点击 “Actions” 选项卡。
+             - 如果提示需要启用 Actions，点击 “I understand my workflows, go ahead and enable them”。
+          3. **配置权限**：
+             - 进入 “Settings” > “Actions” > “General”。
+             - 在 “Workflow permissions” 下，选择 “Read and write permissions”，并勾选 “Allow GitHub Actions to create and approve pull requests”（如果需要）。
+             - 保存设置，确保工作流可以推送代码和创建 Release。
+          4. **准备模块文件**：
+             - 确保 \`OpenList-Magisk/\` 目录包含：
+               - \`module.prop\`（\`version\` 和 \`versionCode\` 由模块构建工作流自动更新）
+               - \`customize.sh\`
+               - \`service.sh\`
+               - \`action.sh\`
+               - \`META-INF/com/google/android/update-binary\` 和 \`updater-script\`
+               - \`system/bin/\`（模块构建工作流自动同步 \`openlist-arm\` 和 \`openlist-arm64\`)
+               - \`CHANGELOG.md\`（模块构建工作流自动更新）
+               - \`README.md\`（本工作流自动更新）
+             - 验证 \`module.prop\` 包含必要的字段（\`id\」、\`name\」、\`author\` 等）。
+          5. **触发工作流**：
+             - **README 更新工作流**（本工作流）：
+               - 每 4 小时检查 OpenList 新版本，更新 \`README.md\` 和 \`OpenList-Magisk/README.md\`。
+               - 手动触发：进入 “Actions” 选项卡，选择 “更新 README 文档”，点击 “Run workflow”。
+             - **模块构建工作流**（另见 \`build-openlist-magisk.yml\`）：
+               - 负责同步二进制文件、更新 \`update.json\`、\`module.prop\`、\`CHANGELOG.md\`，并发布模块 ZIP。
+             - 两个工作流独立运行，确保版本号一致。
+          6. **检查结果**：
+             - 确认根目录和 \`OpenList-Magisk/README.md\` 的版本号为 ${{ env.OPENLIST_VERSION }}。
+             - 检查提交历史，验证 README 更新是否推送到分叉仓库。
+             - 确保模块构建工作流的 Release 包含最新 ZIP 文件。
+          7. **故障排除**：
+             - **工作流失败**：
+               - 检查 Actions 日志，确认错误原因。
+               - 常见问题：
+                 - **权限不足**：确保启用了 “Read and write permissions”。
+                 - **网络问题**：检查 OpenList API（\`https://api.github.com/repos/OpenListTeam/OpenList/releases/latest\`）。
+               - 查看 \`latest_release.json\`（如存在）或日志中的 HTTP 状态码。
+             - **模块相关问题**：
+               - 参考模块构建工作流的日志或 \`README.md\` 的模块故障排除部分。
+             - 如需帮助，提交 Issue 或参考 OpenList 官方文档。
+
+          ## 常见问题
+          - **Q：如何查看 OpenList 服务状态？**
+            - A：在 Magisk 应用中查看模块描述，显示 “运行中” 或 “已停止”。运行 \`pgrep -f openlist\` 检查进程。
+          - **Q：密码文件丢失怎么办？**
+            - A：删除 \`/data/adb/modules/openlist-magisk/随机密码.txt\`，重启设备或运行 \`service.sh\`，重新生成密码。
+          - **Q：模块安装后无法访问服务？**
+            - A：检查设备 IP 和端口（默认 \`http://<IP>:5244\`），确保防火墙未阻止。查看 \`/data/adb/modules/openlist-magisk/service.log\` 排查启动错误。
+          - **Q：如何更新模块？**
+            - A：下载最新 Release 的 ZIP 文件，在 Magisk 中更新模块并重启。
+
+          ## 贡献
+          欢迎提交 Issue 或 Pull Request，报告问题或改进模块功能。特别感谢 [OpenListTeam](https://github.com/OpenListTeam/OpenList) 提供核心文件服务器功能。
+          EOF
+
+          # 复制 README.md 到 OpenList-Magisk/
+          cp README.md OpenList-Magisk/README.md
+
+          # 提交更改
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add README.md OpenList-Magisk/README.md
+          git commit -m "更新 README.md 到 ${{ env.OPENLIST_VERSION }}" || echo "无更改需要提交"
+          git push origin main
+
+      # 清理工作目录
+      - name: 清理工作目录
+        if: always()
+        run: |
+          rm -rf latest_release.json
+          echo "已清理临时文件：latest_release.json"
