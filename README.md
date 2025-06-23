@@ -6,7 +6,7 @@
 OpenList Magisk 模块将 [OpenList](https://github.com/OpenListTeam/OpenList) 文件服务器集成到 Android 系统中，通过 Magisk 以系统化方式运行，支持 ARM 和 ARM64 架构。
 
 ## 功能亮点
-- **自动同步最新版本**：与 OpenList 官方版本保持一致（当前版本：v4.0.0）。
+- **自动同步最新版本**：与 OpenList 官方版本保持一致。
 - **系统级集成**：将 OpenList 二进制文件安装到 /system/bin，系统启动后自动运行服务。
 - **随机凭据生成**：首次启动服务时生成管理员账号和密码，保存至 /data/adb/modules/openlist-magisk/随机密码.txt（格式为“账号：xxx”和“密码：xxx”），后续重启若文件存在则不重置密码。
 - **动态服务管理**：通过 Magisk 的“动作”按钮启动或停止 OpenList 服务，module.prop 的 description 字段动态更新运行状态和访问地址。
