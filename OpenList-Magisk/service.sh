@@ -1,11 +1,11 @@
+---
 #!/system/bin/sh
-# service.sh for OpenList Magisk Module
+# service.sh for OpenList Magisk Magisk Module
 
 MODDIR=${0%/*}
-DATA_DIR="$MODDIR/data"
+DATA_DIR="/storage/emulated/0/Android/openlist"
 OPENLIST_BINARY="/system/bin/openlist"
-MODULE_PROP="$MODDIR/module.prop"
-PASSWORD_FILE="$MODDIR/随机密码.txt"
+MODULE_PROP_FILE="$MODDIR/module.prop"
 LOG_FILE="$MODDIR/service.log"
 
 log() {
@@ -13,134 +13,115 @@ log() {
 }
 
 get_lan_ip() {
-    LAN_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
-    [ -z "$LAN_IP" ] && LAN_IP=$(ifconfig wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}')
-    [ -z "$LAN_IP" ] && LAN_IP="192.168.x.x"
-    log "get_lan_ip: LAN_IP=$LAN_IP"
-    echo "$LAN_IP"
-}
+    # 尝试获取 Wi-Fi IP
+    local ip_address
+    ip_address=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
 
-generate_random_password() {
-    log "Attempting to generate random password"
-    OUTPUT=$($OPENLIST_BINARY admin random --data "$DATA_DIR" 2>&1 | \
-             grep -E "username|password" | \
-             awk '/username/ {print "账号：" $NF} /password/ {print "密码：" $NF}')
-    if [ -n "$OUTPUT" ]; then
-        echo "$OUTPUT" > "$PASSWORD_FILE"
-        chmod 600 "$PASSWORD_FILE" 2>/dev/null || log "Warning: Failed to set permissions on $PASSWORD_FILE"
-        log "Password file created at $PASSWORD_FILE with content: $OUTPUT"
-        echo "$OUTPUT"
-    else
-        log "Error: Failed to generate or capture username and password"
-        return 1
-    fi
-}
-
-get_account_password() {
-    if [ -f "$PASSWORD_FILE" ]; then
-        # 提取账号和密码
-        account=$(grep "账号" "$PASSWORD_FILE" | sed 's/账号：//')
-        password=$(grep "密码" "$PASSWORD_FILE" | sed 's/密码：//')
-        # 去除多余空格或换行
-        account=$(echo "$account" | tr -d '[:space:]\n')
-        password=$(echo "$password" | tr -d '[:space:]\n')
-        if [ -n "$account" ] && [ -n "$password" ]; then
-            log "Extracted account: $account, password: $password"
-            echo "$account|$password"
+    # 如果 Wi-Fi 没有 IP，则尝试获取移动网络 IP
+    if [ -z "$ip_address" ]; then
+        # 检查 Wi-Fi 是否处于连接状态
+        # (注意: 这种检查可能不完全准确，具体取决于Android版本和设备)
+        local wifi_state
+        wifi_state=$(dumpsys wifi | grep "Wi-Fi is" | awk '{print $3}' | tr -d '.')
+        if [ "$wifi_state" != "enabled" ]; then
+            log "警告: Wi-Fi 未启用或未连接，请检查 Wi-Fi 设置。"
         else
-            log "Warning: Failed to extract account or password from $PASSWORD_FILE"
-            echo "未知|未知"
+            log "警告: Wi-Fi 已启用但未能获取到 IP 地址。"
         fi
-    else
-        log "Warning: $PASSWORD_FILE does not exist"
-        echo "未知|未知"
+        ip_address=$(ip addr show rmnet0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
     fi
+
+
+    # 如果以上都未能获取到 IP，则使用默认占位符
+    [ -z "$ip_address" ] && ip_address="无法获取IP"
+    log "获取 IP: ip_address=$ip_address"
+    echo "$ip_address"
 }
 
 update_module_prop_running() {
-    LAN_IP=$(get_lan_ip)
-    log "Updating module.prop for running state, LAN_IP=$LAN_IP"
+    # 修正这里，直接调用函数 get_lan_ip
+    CURRENT_IP=$(get_lan_ip)
+    log "更新 module.prop 运行状态，CURRENT_IP=$CURRENT_IP"
 
     # 获取 openlist 的 PID
-    pid=$(pgrep -f openlist 2>/dev/null)
+    pid=$(pgrep -f "$OPENLIST_BINARY server --data" 2>/dev/null | head -n 1)
     if [ -z "$pid" ]; then
-        log "Error: No running openlist process found"
+        log "错误: 未找到运行中的 openlist"
         NEW_DESC="description=【未运行】无法找到 openlist 进程，请检查日志 $LOG_FILE"
     else
-        log "Found openlist PID: $pid"
+        log "找到 Openlist PID: $pid"
+
+        # 等待5秒以确保 openlist 初始化完成
+        log "等待5秒后检查 openlist 端口 (PID: $pid)"
+        sleep 5
 
         # 尝试使用 ss 获取端口
         port=$(ss -tulnp 2>/dev/null | grep "$pid" | awk '{print $5}' | cut -d':' -f2 | sort -u | head -n 1)
-        if [ -z "$port" ] && command -v netstat >/dev/null 2>&1; then
+        if [ -z "$port" ] && command -v netstat >/dev/null; then
             port=$(netstat -tulnp 2>/dev/null | grep "$pid" | awk '{print $4}' | cut -d':' -f2 | sort -u | head -n 1)
         fi
 
-        # 获取账号和密码
-        account_password=$(get_account_password)
-        account=$(echo "$account_password" | cut -d'|' -f1)
-        password=$(echo "$account_password" | cut -d'|' -f2)
-
         if [ -n "$port" ]; then
-            log "Found openlist port: $port"
-            NEW_DESC="description=【运行中】局域网地址：http://${LAN_IP}:${port} | 首次启动会生成随机密码：${account} | ${password} | 请勿删除模块目录中的“随机密码.txt”，否则重启手机后会把你在后台管理界面设置的自定义密码给顶掉！"
+            log "找到 Openlist 端口: $port"
+            NEW_DESC="description=【运行中】当前地址：http://${CURRENT_IP}:${port} | 数据目录：${DATA_DIR} | 修改密码脚本：/storage/emulated/0/密码修改.sh"
         else
-            log "Warning: No port found for openlist (PID: $pid)"
-            NEW_DESC="description=【运行中】无法检测 openlist 端口，请检查日志 $LOG_FILE | 首次启动会生成随机密码：${account} | ${password} | 请勿删除模块目录中的“随机密码.txt”，否则重启手机后会把你在后台管理界面设置的自定义密码给顶掉！"
+            log "警告: 未找到 openlist 的端口 (PID: $pid)"
+            NEW_DESC="description=【运行中】无法检测 openlist 端口，请检查日志 $LOG_FILE | 数据目录：${DATA_DIR} | 修改密码脚本：/storage/emulated/0/密码修改.sh"
         fi
     fi
 
     # 确保 module.prop 存在且可写
-    if [ ! -f "$MODULE_PROP" ]; then
-        log "Error: $MODULE_PROP does not exist"
+    if [ ! -f "$MODULE_PROP_FILE" ]; then
+        log "错误: $MODULE_PROP_FILE 不存在"
         return 1
     fi
-    if [ ! -w "$MODULE_PROP" ]; then
-        log "Warning: $MODULE_PROP is not writable, attempting to fix permissions"
-        chmod 644 "$MODULE_PROP" 2>/dev/null || log "Error: Failed to set permissions on $MODULE_PROP"
+    if [ ! -w "$MODULE_PROP_FILE" ]; then
+        log "警告: $MODULE_PROP_FILE 不可写，尝试修复权限"
+        chmod 644 "$MODULE_PROP_FILE" 2>/dev/null || log "错误: 无法设置 $MODULE_PROP_FILE 的权限"
     fi
 
     # 记录更新前的 module.prop 内容
-    log "module.prop content before update: $(cat "$MODULE_PROP" 2>/dev/null || echo 'Unable to read module.prop')"
+    log "更新前的 module.prop 内容: $(cat "$MODULE_PROP_FILE" 2>/dev/null || echo '无法读取 module.prop')"
 
     # 更新 description 字段
-    echo "$(grep -v '^description=' "$MODULE_PROP" 2>/dev/null)" > "${MODULE_PROP}.tmp"
-    echo "$NEW_DESC" >> "${MODULE_PROP}.tmp"
-    mv "${MODULE_PROP}.tmp" "$MODULE_PROP" 2>/dev/null
+    echo "$(grep -v '^description=' "$MODULE_PROP_FILE" 2>/dev/null)" > "${MODULE_PROP_FILE}.tmp"
+    echo "$NEW_DESC" >> "${MODULE_PROP_FILE}.tmp"
+    mv "${MODULE_PROP_FILE}.tmp" "$MODULE_PROP_FILE" 2>/dev/null
     if [ $? -eq 0 ]; then
-        log "Updated module.prop successfully"
+        log "成功更新 module.prop"
     else
-        log "Error: Failed to update module.prop"
+        log "错误: 更新 module.prop 失败"
     fi
 
     # 清理备份文件
-    rm -f "${MODULE_PROP}.bak" "${MODULE_PROP}.tmp.*" 2>/dev/null
+    rm -f "${MODULE_PROP_FILE}.bak" "${MODULE_PROP_FILE}.tmp.*" 2>/dev/null
 
     # 检查 module.prop 是否包含非键值对行
-    if grep -vE '^[a-zA-Z_]+=' "$MODULE_PROP" >/dev/null 2>&1; then
-        log "Warning: module.prop contains invalid lines, cleaning up"
-        grep -E '^[a-zA-Z_]+=' "$MODULE_PROP" > "${MODULE_PROP}.clean" 2>/dev/null
-        mv "${MODULE_PROP}.clean" "$MODULE_PROP" 2>/dev/null
-        log "Cleaned module.prop content: $(cat "$MODULE_PROP" 2>/dev/null || echo 'Unable to read module.prop')"
+    if grep -vE '^[a-zA-Z_]+=' "$MODULE_PROP_FILE" >/dev/null; then
+        log "警告: module.prop 包含无效行，正在清理"
+        grep -E '^[a-zA-Z_]+=' "$MODULE_PROP_FILE" > "${MODULE_PROP_FILE}.clean" 2>/dev/null
+        mv "${MODULE_PROP_FILE}.clean" "$MODULE_PROP_FILE" 2>/dev/null
+        log "清理后的 module.prop 内容: $(cat "$MODULE_PROP_FILE" 2>/dev/null || echo '无法读取 module.prop')"
     fi
 }
 
-log "Starting service.sh at $(date '+%Y-%m-%d %H:%M:%S')"
+log "启动 service.sh 于 $(date '+%Y-%m-%d %H:%M:%S')"
 
 # 检查 ip 命令是否存在
-if ! command -v ip >/dev/null 2>&1; then
-    log "Error: ip command not found"
+if ! command -v ip >/dev/null; then
+    log "错误: 未找到 ip 命令"
     exit 1
 fi
 
 # 检查 openlist 二进制文件
 if [ ! -f "$OPENLIST_BINARY" ]; then
-    log "Error: $OPENLIST_BINARY does not exist"
+    log "错误: $OPENLIST_BINARY 不存在"
     exit 1
 fi
 if [ ! -x "$OPENLIST_BINARY" ]; then
-    log "Warning: $OPENLIST_BINARY is not executable, attempting to fix"
-    chmod +x "$OPENLIST_BINARY" 2>/dev/null || {
-        log "Error: Failed to set executable permissions on $OPENLIST_BINARY"
+    log "警告: $OPENLIST_BINARY 不可执行，尝试修复"
+    chmod 755 "$OPENLIST_BINARY" 2>/dev/null || {
+        log "错误: 无法设置 $OPENLIST_BINARY 的执行权限"
         exit 1
     }
 fi
@@ -148,47 +129,49 @@ fi
 # 检查并创建数据目录
 mkdir -p "$DATA_DIR" 2>/dev/null
 if [ $? -ne 0 ]; then
-    log "Error: Failed to create data directory $DATA_DIR"
+    log "错误: 无法创建数据目录 $DATA_DIR"
     exit 1
 fi
-log "Created or verified data directory: $DATA_DIR"
+if [ ! -w "$DATA_DIR" ]; then
+    log "警告: 数据目录 $DATA_DIR 不可写，尝试修复权限"
+    chmod 777 "$DATA_DIR" 2>/dev/null || {
+        log "错误: 无法设置 $DATA_DIR 的写权限"
+        exit 1
+    }
+fi
+log "已创建或验证数据目录：$DATA_DIR"
 
 # 等待系统启动完成
 ELAPSED=0
 MAX_WAIT=60
 WAIT_INTERVAL=5
-while [ $ELAPSED -lt $MAX_WAIT ]; do
+while [ $ELAPSED -lt "$MAX_WAIT" ]; do
     if [ "$(getprop sys.boot_completed)" = "1" ]; then
-        log "Android system boot completed"
+        log "Android 系统启动完成"
         break
     fi
-    log "Waiting for Android system boot... ($ELAPSED/$MAX_WAIT seconds)"
+    log "等待 Android 系统启动... ($ELAPSED/$MAX_WAIT 秒)"
     sleep $WAIT_INTERVAL
     ELAPSED=$((ELAPSED + WAIT_INTERVAL))
 done
 
-if [ $ELAPSED -ge $MAX_WAIT ]; then
-    log "Warning: System boot timeout, attempting to start OpenList service"
+if [ $ELAPSED -ge "$MAX_WAIT" ]; then
+    log "警告: 系统启动超时，继续尝试启动 openlist"
 fi
 
 # 启动 openlist 服务
-log "Starting OpenList: $OPENLIST_BINARY server --data $DATA_DIR"
+log "启动 OpenList: $OPENLIST_BINARY server --data $DATA_DIR"
 $OPENLIST_BINARY server --data "$DATA_DIR" &
 OPENLIST_PID=$!
 
 # 检查 openlist 是否启动成功
-if ps -p $OPENLIST_PID >/dev/null 2>&1 || pgrep -f openlist >/dev/null 2>&1; then
-    log "OpenList service started successfully (PID: $OPENLIST_PID)"
-    if [ ! -f "$PASSWORD_FILE" ]; then
-        generate_random_password || log "Password generation failed, continuing"
-    else
-        log "Detected $PASSWORD_FILE, skipping password generation"
-    fi
+if ps -p $OPENLIST_PID >/dev/null || pgrep -f "$OPENLIST_BINARY server --data" >/dev/null; then
+    log "OpenList 服务启动成功 (PID: $OPENLIST_PID)"
     update_module_prop_running
 else
-    log "Error: Failed to start OpenList service"
+    log "错误: 无法启动 OpenList 服务"
     # 尝试手动运行以捕获错误
     OUTPUT=$($OPENLIST_BINARY server --data "$DATA_DIR" 2>&1)
-    log "Manual run output: $OUTPUT"
+    log "手动运行输出: $OUTPUT"
     exit 1
 fi
