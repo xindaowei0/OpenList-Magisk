@@ -1,10 +1,9 @@
----
 #!/system/bin/sh
-# service.sh for OpenList Magisk Magisk Module
+# service.sh for OpenList Magisk Module
 
 MODDIR=${0%/*}
-DATA_DIR="/storage/emulated/0/Android/openlist"
-OPENLIST_BINARY="/system/bin/openlist"
+DATA_DIR="/data/adb/openlist/"
+OPENLIST_BINARY="${MODDIR}/system/bin/openlist"
 MODULE_PROP_FILE="$MODDIR/module.prop"
 LOG_FILE="$MODDIR/service.log"
 
@@ -19,8 +18,6 @@ get_lan_ip() {
 
     # 如果 Wi-Fi 没有 IP，则尝试获取移动网络 IP
     if [ -z "$ip_address" ]; then
-        # 检查 Wi-Fi 是否处于连接状态
-        # (注意: 这种检查可能不完全准确，具体取决于Android版本和设备)
         local wifi_state
         wifi_state=$(dumpsys wifi | grep "Wi-Fi is" | awk '{print $3}' | tr -d '.')
         if [ "$wifi_state" != "enabled" ]; then
@@ -31,7 +28,6 @@ get_lan_ip() {
         ip_address=$(ip addr show rmnet0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
     fi
 
-
     # 如果以上都未能获取到 IP，则使用默认占位符
     [ -z "$ip_address" ] && ip_address="无法获取IP"
     log "获取 IP: ip_address=$ip_address"
@@ -39,7 +35,6 @@ get_lan_ip() {
 }
 
 update_module_prop_running() {
-    # 修正这里，直接调用函数 get_lan_ip
     CURRENT_IP=$(get_lan_ip)
     log "更新 module.prop 运行状态，CURRENT_IP=$CURRENT_IP"
 
@@ -51,22 +46,24 @@ update_module_prop_running() {
     else
         log "找到 Openlist PID: $pid"
 
-        # 等待5秒以确保 openlist 初始化完成
-        log "等待5秒后检查 openlist 端口 (PID: $pid)"
-        sleep 5
-
         # 尝试使用 ss 获取端口
         port=$(ss -tulnp 2>/dev/null | grep "$pid" | awk '{print $5}' | cut -d':' -f2 | sort -u | head -n 1)
         if [ -z "$port" ] && command -v netstat >/dev/null; then
             port=$(netstat -tulnp 2>/dev/null | grep "$pid" | awk '{print $4}' | cut -d':' -f2 | sort -u | head -n 1)
         fi
 
+        # 检查初始密码文件
+        PASSWORD_TEXT=""
+        if [ -f "${DATA_DIR}/初始密码.txt" ]; then
+            PASSWORD_TEXT=" | 初始密码：$(cat "${DATA_DIR}/初始密码.txt")"
+        fi
+
         if [ -n "$port" ]; then
             log "找到 Openlist 端口: $port"
-            NEW_DESC="description=【运行中】当前地址：http://${CURRENT_IP}:${port} | 数据目录：${DATA_DIR} | 修改密码脚本：/storage/emulated/0/密码修改.sh"
+            NEW_DESC="description=【运行中】当前地址：http://${CURRENT_IP}:${port} | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
         else
             log "警告: 未找到 openlist 的端口 (PID: $pid)"
-            NEW_DESC="description=【运行中】无法检测 openlist 端口，请检查日志 $LOG_FILE | 数据目录：${DATA_DIR} | 修改密码脚本：/storage/emulated/0/密码修改.sh"
+            NEW_DESC="description=【运行中】无法检测 openlist 端口，请检查日志 $LOG_FILE | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
         fi
     fi
 
@@ -114,6 +111,10 @@ if ! command -v ip >/dev/null; then
 fi
 
 # 检查 openlist 二进制文件
+if [ "$OPENLIST_BINARY" = "TO_BE_REPLACED" ]; then
+    log "错误: OPENLIST_BINARY 未在安装时配置"
+    exit 1
+fi
 if [ ! -f "$OPENLIST_BINARY" ]; then
     log "错误: $OPENLIST_BINARY 不存在"
     exit 1
@@ -124,6 +125,12 @@ if [ ! -x "$OPENLIST_BINARY" ]; then
         log "错误: 无法设置 $OPENLIST_BINARY 的执行权限"
         exit 1
     }
+fi
+
+# 检查 DATA_DIR 是否配置
+if [ "$DATA_DIR" = "TO_BE_REPLACED" ]; then
+    log "错误: DATA_DIR 未在安装时配置"
+    exit 1
 fi
 
 # 检查并创建数据目录
@@ -144,18 +151,17 @@ log "已创建或验证数据目录：$DATA_DIR"
 # 等待系统启动完成
 ELAPSED=0
 MAX_WAIT=60
-WAIT_INTERVAL=5
-while [ $ELAPSED -lt "$MAX_WAIT" ]; do
+while [ $ELAPSED -lt $MAX_WAIT ]; do
     if [ "$(getprop sys.boot_completed)" = "1" ]; then
         log "Android 系统启动完成"
         break
     fi
     log "等待 Android 系统启动... ($ELAPSED/$MAX_WAIT 秒)"
-    sleep $WAIT_INTERVAL
-    ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
 done
 
-if [ $ELAPSED -ge "$MAX_WAIT" ]; then
+if [ $ELAPSED -ge $MAX_WAIT ]; then
     log "警告: 系统启动超时，继续尝试启动 openlist"
 fi
 
