@@ -4,7 +4,9 @@
 
 #### 在此感谢[![TianwanTW's GitHub](https://img.shields.io/badge/GitHub-TianwanTW-blue?logo=github)](https://github.com/TianwanTW)大佬提交的PR，使用基于magisk提供的busybox的语法重写了customize.sh刷机脚本，解决了部分安卓用户死在刷机脚本无法执行这一步。
 
-@TianwanTW in https://github.com/TianwanTW
+@TianwanTW https://github.com/TianwanTW
+
+
 
 #### 截止2025/6/24 21:54
 #### 更新了自述文档，根据busybox语法重构customize.sh刷机脚本解决部分用户无法刷入模块的问题。(之前的customize.sh刷机脚本使用的是纯bash语法，有人可以有人不行)
