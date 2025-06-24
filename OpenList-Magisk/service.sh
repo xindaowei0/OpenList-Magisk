@@ -12,20 +12,37 @@ log() {
 }
 
 get_lan_ip() {
-    # 尝试获取 Wi-Fi IP
-    local ip_address
-    ip_address=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+    # 使用Magisk提供的BusyBox（如果可用）或系统命令
+    BUSYBOX="/data/adb/magisk/busybox"
+    if [ -x "$BUSYBOX" ]; then
+        IP_CMD="$BUSYBOX ip"
+        IFCONFIG_CMD="$BUSYBOX ifconfig"
+        GREP_CMD="$BUSYBOX grep"
+        AWK_CMD="$BUSYBOX awk"
+        CUT_CMD="$BUSYBOX cut"
+        HEAD_CMD="$BUSYBOX head"
+    else
+        IP_CMD="ip"
+        IFCONFIG_CMD="ifconfig"
+        GREP_CMD="grep"
+        AWK_CMD="awk"
+        CUT_CMD="cut"
+        HEAD_CMD="head"
+        log "警告: BusyBox 未找到，使用系统命令"
+    fi
 
-    # 如果 Wi-Fi 没有 IP，则尝试获取移动网络 IP
+    # 获取活动网络接口（优先Wi-Fi或以太网）
+    INTERFACE=$($IP_CMD link | $GREP_CMD "state UP" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f1 | $GREP_CMD -E "wlan|eth" | $HEAD_CMD -n 1)
+
+    # 如果没有找到活动接口，默认wlan0
+    [ -z "$INTERFACE" ] && INTERFACE="wlan0"
+
+    # 使用ip命令获取IP地址
+    ip_address=$($IP_CMD addr show $INTERFACE | $GREP_CMD "inet " | $AWK_CMD '{print $2}' | $CUT_CMD -d/ -f1)
+
+    # 如果ip命令失败，尝试ifconfig
     if [ -z "$ip_address" ]; then
-        local wifi_state
-        wifi_state=$(dumpsys wifi | grep "Wi-Fi is" | awk '{print $3}' | tr -d '.')
-        if [ "$wifi_state" != "enabled" ]; then
-            log "警告: Wi-Fi 未启用或未连接，请检查 Wi-Fi 设置。"
-        else
-            log "警告: Wi-Fi 已启用但未能获取到 IP 地址。"
-        fi
-        ip_address=$(ip addr show rmnet0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+        ip_address=$($IFCONFIG_CMD $INTERFACE 2>/dev/null | $GREP_CMD "inet addr" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f2)
     fi
 
     # 如果以上都未能获取到 IP，则使用默认占位符
