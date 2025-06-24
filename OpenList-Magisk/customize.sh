@@ -1,4 +1,4 @@
-#!/system/bin/sh
+# shellcheck shell=ash
 
 ui_print "正在安装 OpenList Magisk 模块..."
 
@@ -9,25 +9,30 @@ ui_print "检测到架构: $ARCH"
 # 定义二进制文件名
 BINARY_NAME="openlist"
 
-# 按键检测函数
-check_button() {
-    if [ -x "/system/bin/getevent" ]; then
-        /system/bin/getevent -lc 1 2>/dev/null | while read line; do
-            if echo "$line" | grep -q "KEY_VOLUMEUP.*DOWN"; then
-                echo "up"
-                break
-            elif echo "$line" | grep -q "KEY_VOLUMEDOWN.*DOWN"; then
-                echo "down"
-                break
-            fi
-        done
-    elif [ -f "$MODPATH/keycheck" ]; then
-        "$MODPATH/keycheck"
-        case $? in
-            42) echo "up" ;;
-            41) echo "down" ;;
+# Code from NGA SDK (https://github.com/TianwanTW/NGA-SDK/blob/nga/src/shell/nga-utils.sh)
+until_key() {
+    local eventCode
+    while :; do
+        eventCode=$(getevent -qlc 1 | awk '{if ($2=="EV_KEY" && $4=="DOWN") {print $3; exit}}')
+        case "$eventCode" in
+        KEY_VOLUMEUP)
+            printf up
+            return
+            ;;
+        KEY_VOLUMEDOWN)
+            printf down
+            return
+            ;;
+        KEY_POWER)
+            echo -n power
+            return
+            ;;
+        KEY_F[1-9] | KEY_F1[0-9] | KEY_F2[0-4])
+            echo -n "$eventCode" | sed 's/KEY_F/f/g'
+            return
+            ;;
         esac
-    fi
+    done
 }
 
 # 显示菜单选项
@@ -90,8 +95,7 @@ make_selection() {
     esac
     
     while true; do
-        key=$(check_button)
-        case "$key" in
+        case "$(until_key)" in
             "up")
                 ui_print "✅ 已确认选项 $current"
                 return $current
@@ -121,11 +125,11 @@ case $INSTALL_OPTION in
         ;;
     2) 
         BINARY_PATH="$MODPATH/bin/"
-        BINARY_SERVICE_PATH="\${MODDIR}/bin/openlist"  # 使用 MODDIR 变量
+        BINARY_SERVICE_PATH="\$MODDIR/bin/openlist"  # 使用 MODDIR 变量
         ;;
     3) 
         BINARY_PATH="$MODPATH/system/bin/"
-        BINARY_SERVICE_PATH="\${MODDIR}/system/bin/openlist"  # 使用 MODDIR 变量
+        BINARY_SERVICE_PATH="\$MODDIR/system/bin/openlist"  # 使用 MODDIR 变量
         ;;
 esac
 
@@ -139,8 +143,7 @@ if echo "$ARCH" | grep -q "arm64"; then
         mv "$MODPATH/openlist-arm64" "$BINARY_PATH/$BINARY_NAME"
         rm -f "$MODPATH/openlist-arm"
     else
-        ui_print "❌ 错误：未找到 ARM64 版本文件"
-        exit 1
+        abort "❌ 错误：未找到 ARM64 版本文件"
     fi
 else
     ui_print "📦 安装 ARM 版本..."
@@ -148,14 +151,13 @@ else
         mv "$MODPATH/openlist-arm" "$BINARY_PATH/$BINARY_NAME"
         rm -f "$MODPATH/openlist-arm64"
     else
-        ui_print "❌ 错误：未找到 ARM 版本文件"
-        exit 1
+        abort "❌ 错误：未找到 ARM 版本文件"
     fi
 fi
 
 chmod 755 "$BINARY_PATH/$BINARY_NAME"
 
-[ "$BINARY_PATH" = "$MODPATH/system/bin/" ] && chcon u:object_r:system_file:s0 "$BINARY_PATH/$BINARY_NAME"
+[ "$BINARY_PATH" = "$MODPATH/system/bin/" ] && chcon -R u:object_r:system_file:s0 "$BINARY_PATH/$BINARY_NAME"
 
 # 选择数据目录
 make_selection "data" "2"
@@ -163,7 +165,7 @@ DATA_DIR_OPTION=$?
 
 case $DATA_DIR_OPTION in
     1) DATA_DIR="/data/adb/openlist/" ;;
-    2) DATA_DIR="/storage/emulated/0/Android/openlist/" ;;
+    2) DATA_DIR="/sdcard/Android/openlist/" ;;
 esac
 
 # 数据迁移提示
@@ -179,8 +181,6 @@ ui_print "━━━━━━━━━━━━━━━━━━━━━━"
 
 # 更新 service.sh
 if [ -f "$MODPATH/service.sh" ]; then
-    chmod 644 "$MODPATH/service.sh"
-    
     # 仅替换占位符，保留其他所有内容
     sed -i "s|^DATA_DIR=.*|DATA_DIR=\"$DATA_DIR\"|" "$MODPATH/service.sh"
     sed -i "s|^OPENLIST_BINARY=.*|OPENLIST_BINARY=\"$BINARY_SERVICE_PATH\"|" "$MODPATH/service.sh"
@@ -190,14 +190,10 @@ if [ -f "$MODPATH/service.sh" ]; then
        grep -q "^DATA_DIR=\"$DATA_DIR\"" "$MODPATH/service.sh"; then
         ui_print "✅ 配置更新成功"
     else
-        ui_print "❌ 配置更新失败"
-        exit 1
+        abort "❌ 配置更新失败"
     fi
-    
-    chmod 755 "$MODPATH/service.sh"
 else
-    ui_print "❌ 错误：未找到 service.sh"
-    exit 1
+    abort "❌ 错误：未找到 service.sh"
 fi
 
 # 完成安装
@@ -242,10 +238,7 @@ if [ "$PASSWORD_OPTION" = "2" ]; then
         mkdir -p "$DATA_DIR"
         
         # 写入密码到初始密码.txt
-        echo "admin" > "$DATA_DIR/初始密码.txt"
-        if [ $? -eq 0 ]; then
-            # 设置文件权限确保可读
-            chmod 644 "$DATA_DIR/初始密码.txt"
+        if echo "admin" > "$DATA_DIR/初始密码.txt"; then
             ui_print "✅ 已将密码保存到：$DATA_DIR/初始密码.txt"
         else
             ui_print "❌ 密码文件写入失败"

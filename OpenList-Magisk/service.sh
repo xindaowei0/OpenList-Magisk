@@ -1,9 +1,9 @@
-#!/system/bin/sh
+# shellcheck shell=ash
 # service.sh for OpenList Magisk Module
 
-MODDIR=${0%/*}
+MODDIR="${0%/*}"
 DATA_DIR="/data/adb/openlist/"
-OPENLIST_BINARY="${MODDIR}/system/bin/openlist"
+OPENLIST_BINARY="$MODDIR/system/bin/openlist"
 MODULE_PROP_FILE="$MODDIR/module.prop"
 LOG_FILE="$MODDIR/service.log"
 
@@ -81,10 +81,9 @@ update_module_prop_running() {
     log "更新前的 module.prop 内容: $(cat "$MODULE_PROP_FILE" 2>/dev/null || echo '无法读取 module.prop')"
 
     # 更新 description 字段
-    echo "$(grep -v '^description=' "$MODULE_PROP_FILE" 2>/dev/null)" > "${MODULE_PROP_FILE}.tmp"
+    grep -v '^description=' "$MODULE_PROP_FILE" > "${MODULE_PROP_FILE}.tmp" 2>/dev/null
     echo "$NEW_DESC" >> "${MODULE_PROP_FILE}.tmp"
-    mv "${MODULE_PROP_FILE}.tmp" "$MODULE_PROP_FILE" 2>/dev/null
-    if [ $? -eq 0 ]; then
+    if mv "${MODULE_PROP_FILE}.tmp" "$MODULE_PROP_FILE" 2>/dev/null; then
         log "成功更新 module.prop"
     else
         log "错误: 更新 module.prop 失败"
@@ -134,8 +133,7 @@ if [ "$DATA_DIR" = "TO_BE_REPLACED" ]; then
 fi
 
 # 检查并创建数据目录
-mkdir -p "$DATA_DIR" 2>/dev/null
-if [ $? -ne 0 ]; then
+if mkdir -p "$DATA_DIR" 2>/dev/null; then
     log "错误: 无法创建数据目录 $DATA_DIR"
     exit 1
 fi

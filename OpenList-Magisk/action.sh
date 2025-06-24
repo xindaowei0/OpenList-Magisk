@@ -1,9 +1,8 @@
 #!/system/bin/sh
+# shellcheck shell=ash
 # action.sh for OpenList Magisk Module
 
-MODDIR=${0%/*}
-OPENLIST_BINARY="/system/bin/openlist"
-DATA_DIR="$MODDIR/data"
+MODDIR="${0%/*}"
 MODULE_PROP="$MODDIR/module.prop"
 SERVICE_SH="$MODDIR/service.sh"
 REPO_URL="https://github.com/Alien-Et/OpenList-Magisk"

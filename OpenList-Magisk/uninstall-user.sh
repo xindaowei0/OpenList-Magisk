@@ -40,6 +40,34 @@ clean_binaries() {
     fi
 }
 
+# 清理数据目录
+clean_data() {
+    echo "数据清理选项："
+    echo "1. 保留数据"
+    echo "2. 删除所有数据"
+    echo "请选择（输入数字）："
+    read -r choice
+
+    case "$choice" in
+        1)
+            log "已选择保留数据"
+            ;;
+        2)
+            log "开始清理数据目录..."
+            for dir in "/data/adb/openlist" "/sdcard/Android/openlist"; do
+                if [ -d "$dir" ]; then
+                    log "正在删除数据目录：$dir"
+                    rm -rf "$dir"
+                fi
+            done
+            log "数据目录清理完成"
+            ;;
+        *)
+            log "无效选择，默认保留数据"
+            ;;
+    esac
+}
+
 # 主要卸载流程
 main() {
     log "开始卸载 OpenList Magisk 模块..."
@@ -49,6 +77,9 @@ main() {
     
     # 清理二进制文件
     clean_binaries
+    
+    # 清理数据（用户选择）
+    clean_data
     
     log "卸载完成"
     echo "请重启设备以完成卸载"
