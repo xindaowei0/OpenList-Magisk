@@ -133,7 +133,8 @@ if [ "$DATA_DIR" = "TO_BE_REPLACED" ]; then
 fi
 
 # 检查并创建数据目录
-if mkdir -p "$DATA_DIR" 2>/dev/null; then
+mkdir -p "$DATA_DIR" 2>/dev/null
+if [ $? -ne 0 ]; then  # 如果返回值不为0（失败）
     log "错误: 无法创建数据目录 $DATA_DIR"
     exit 1
 fi
