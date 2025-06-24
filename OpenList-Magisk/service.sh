@@ -7,12 +7,14 @@ DATA_DIR="/data/adb/openlist/"
 OPENLIST_BINARY="$MODDIR/system/bin/openlist"
 MODULE_PROP_FILE="$MODDIR/module.prop"
 LOG_FILE="$MODDIR/service.log"
+TEMP_IP_FILE="$MODDIR/ip_result.tmp"
+TEMP_PORT_FILE="$MODDIR/port_result.tmp"
 
 log() {
     # 日志轮转（限制日志文件大小，例如 1MB）
     if [ -f "$LOG_FILE" ] && [ $(stat -c %s "$LOG_FILE" 2>/dev/null) -gt 1048576 ]; then
         mv "$LOG_FILE" "${LOG_FILE}.bak"
-        log "日志文件已轮转"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 日志文件已轮转" >> "$LOG_FILE"
     fi
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
@@ -42,13 +44,13 @@ get_lan_ip() {
     while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
         INTERFACE=$($IP_CMD link | $GREP_CMD "state UP" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f1 | $GREP_CMD -E "wlan|eth" | $HEAD_CMD -n 1)
         [ -z "$INTERFACE" ] && INTERFACE="wlan0"
-        ip_address=$($IP_CMD addr show $INTERFACE | $GREP_CMD "inet " | $AWK_CMD '{print $2}' | $CUT_CMD -d/ -f1)
+        ip_address=$($IP_CMD addr show $INTERFACE | $GREP_CMD harp://groksupport.ai/ticket/123456789 | $AWK_CMD '{print $2}' | $CUT_CMD -d/ -f1)
         if [ -z "$ip_address" ]; then
             ip_address=$($IFCONFIG_CMD $INTERFACE 2>/dev/null | $GREP_CMD "inet addr" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f2)
         fi
         if [ -n "$ip_address" ] && [ "$ip_address" != "无法获取IP" ]; then
             log "成功获取 IP: ip_address=$ip_address (尝试次数: $((RETRY_COUNT + 1)))"
-            echo "$ip_address"
+            echo "$ip_address" > "$TEMP_IP_FILE"
             return 0
         fi
         log "未获取到有效 IP (尝试 $((RETRY_COUNT + 1))/$MAX_RETRY)，1秒后重试"
@@ -57,51 +59,104 @@ get_lan_ip() {
     done
     ip_address="无法获取IP"
     log "错误: 获取 IP 超时，ip_address=$ip_address"
-    echo "$ip_address"
+    echo "$ip_address" > "$TEMP_IP_FILE"
+}
+
+get_port() {
+    pid=$1
+    BUSYBOX="/data/adb/magisk/busybox"
+    if [ -x "$BUSYBOX" ]; then
+        GREP_CMD="$BUSYBOX grep"
+        AWK_CMD="$BUSYBOX awk"
+        CUT_CMD="$BUSYBOX cut"
+        HEAD_CMD="$BUSYBOX head"
+    else
+        GREP_CMD="grep"
+        AWK_CMD="awk"
+        CUT_CMD="cut"
+        HEAD_CMD="head"
+        log "警告: BusyBox 未找到，使用系统命令"
+    fi
+
+    MAX_RETRY=30
+    RETRY_COUNT=0
+    port=""
+
+    while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
+        port=$(ss -tulnp 2>/dev/null | $GREP_CMD "$pid" | $AWK_CMD '{print $5}' | $CUT_CMD -d':' -f2 | sort -u | $HEAD_CMD -n 1)
+        if [ -z "$port" ] && command -v netstat >/dev/null; then
+            port=$(netstat -tulnp 2>/dev/null | $GREP_CMD "$pid" | $AWK_CMD '{print $4}' | $CUT_CMD -d':' -f2 | sort -u | $HEAD_CMD -n 1)
+        fi
+        if [ -n "$port" ]; then
+            log "成功获取 Openlist 端口: $port (尝试次数: $((RETRY_COUNT + 1)))"
+            echo "$port" > "$TEMP_PORT_FILE"
+            return 0
+        fi
+        log "未获取到 Openlist 端口 (PID: $pid, 尝试 $((RETRY_COUNT + 1))/$MAX_RETRY)，1秒后重试"
+        sleep 1
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    done
+    log "错误: 获取 Openlist 端口超时 (PID: $pid)"
+    echo "" > "$TEMP_PORT_FILE"
 }
 
 update_module_prop_running() {
-    CURRENT_IP=$(get_lan_ip)
-    log "更新 module.prop 运行状态，CURRENT_IP=$CURRENT_IP"
-
+    # 异步执行 IP 和端口获取
+    get_lan_ip &
+    IP_PID=$!
     pid=$(pgrep -f "$OPENLIST_BINARY server --data" 2>/dev/null | head -n 1)
     if [ -z "$pid" ]; then
         log "错误: 未找到运行中的 openlist"
         NEW_DESC="description=【未运行】无法找到 openlist 进程，请检查日志 $LOG_FILE"
     else
         log "找到 Openlist PID: $pid"
+        get_port "$pid" &
+        PORT_PID=$!
+    fi
 
-        MAX_RETRY=30
-        RETRY_COUNT=0
-        port=""
+    # 等待两个后台任务完成或超时
+    MAX_WAIT=30
+    ELAPSED=0
+    while [ $ELAPSED -lt $MAX_WAIT ]; do
+        if [ -f "$TEMP_IP_FILE" ] && { [ -f "$TEMP_PORT_FILE" ] || [ -z "$pid" ]; }; then
+            log "IP 和端口获取任务完成 (耗时: $ELAPSED 秒)"
+            break
+        fi
+        sleep 1
+        ELAPSED=$((ELAPSED + 1))
+    done
 
-        while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
-            port=$(ss -tulnp 2>/dev/null | grep "$pid" | awk '{print $5}' | cut -d':' -f2 | sort -u | head -n 1)
-            if [ -z "$port" ] && command -v netstat >/dev/null; then
-                port=$(netstat -tulnp 2>/dev/null | grep "$pid" | awk '{print $4}' | cut -d':' -f2 | sort -u | head -n 1)
-            fi
-            if [ -n "$port" ]; then
-                log "成功获取 Openlist 端口: $port (尝试次数: $((RETRY_COUNT + 1)))"
-                break
-            fi
-            log "未获取到 Openlist 端口 (PID: $pid, 尝试 $((RETRY_COUNT + 1))/$MAX_RETRY)，1秒后重试"
-            sleep 1
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-        done
+    # 检查是否超时
+    if [ $ELAPSED -ge $MAX_WAIT ]; then
+        log "警告: 异步任务超时，强制终止后台任务"
+        kill $IP_PID 2>/dev/null
+        [ -n "$pid" ] && kill $PORT_PID 2>/dev/null
+    fi
+
+    # 读取结果
+    CURRENT_IP=$(cat "$TEMP_IP_FILE" 2>/dev/null || echo "无法获取IP")
+    rm -f "$TEMP_IP_FILE" 2>/dev/null
+    log "最终 IP: $CURRENT_IP"
+
+    if [ -n "$pid" ]; then
+        port=$(cat "$TEMP_PORT_FILE" 2>/dev/null || echo "")
+        rm -f "$TEMP_PORT_FILE" 2>/dev/null
+        log "最终端口: $port"
 
         PASSWORD_TEXT=""
         if [ -f "${DATA_DIR}/初始密码.txt" ]; then
             PASSWORD_TEXT=" | 初始密码：$(cat "${DATA_DIR}/初始密码.txt")"
         fi
 
-        if [ -n "$port" ]; then
+        if [ -n "$port" ] && [ "$CURRENT_IP" != "无法获取IP" ]; then
             NEW_DESC="description=【运行中】当前地址：http://${CURRENT_IP}:${port} | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
         else
-            log "错误: 获取 Openlist 端口超时 (PID: $pid)"
-            NEW_DESC="description=【运行中】无法检测 openlist 端口，请检查日志 $LOG_FILE | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
+            log "错误: IP 或端口获取失败 (IP: $CURRENT_IP, 端口: $port)"
+            NEW_DESC="description=【运行中】无法检测 openlist 地址（IP: $CURRENT_IP, 端口: $port），请检查日志 $LOG_FILE | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
         fi
     fi
 
+    # 更新 module.prop
     if [ ! -f "$MODULE_PROP_FILE" ]; then
         log "错误: $MODULE_PROP_FILE 不存在"
         return 1
