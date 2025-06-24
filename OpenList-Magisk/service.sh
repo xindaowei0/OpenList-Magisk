@@ -1,3 +1,4 @@
+#!/system/bin/sh
 # shellcheck shell=ash
 # service.sh for OpenList Magisk Module
 
@@ -8,11 +9,15 @@ MODULE_PROP_FILE="$MODDIR/module.prop"
 LOG_FILE="$MODDIR/service.log"
 
 log() {
+    # 日志轮转（限制日志文件大小，例如 1MB）
+    if [ -f "$LOG_FILE" ] && [ $(stat -c %s "$LOG_FILE" 2>/dev/null) -gt 1048576 ]; then
+        mv "$LOG_FILE" "${LOG_FILE}.bak"
+        log "日志文件已轮转"
+    fi
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
 get_lan_ip() {
-    # 使用Magisk提供的BusyBox（如果可用）或系统命令
     BUSYBOX="/data/adb/magisk/busybox"
     if [ -x "$BUSYBOX" ]; then
         IP_CMD="$BUSYBOX ip"
@@ -31,23 +36,27 @@ get_lan_ip() {
         log "警告: BusyBox 未找到，使用系统命令"
     fi
 
-    # 获取活动网络接口（优先Wi-Fi或以太网）
-    INTERFACE=$($IP_CMD link | $GREP_CMD "state UP" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f1 | $GREP_CMD -E "wlan|eth" | $HEAD_CMD -n 1)
+    MAX_RETRY=30
+    RETRY_COUNT=0
 
-    # 如果没有找到活动接口，默认wlan0
-    [ -z "$INTERFACE" ] && INTERFACE="wlan0"
-
-    # 使用ip命令获取IP地址
-    ip_address=$($IP_CMD addr show $INTERFACE | $GREP_CMD "inet " | $AWK_CMD '{print $2}' | $CUT_CMD -d/ -f1)
-
-    # 如果ip命令失败，尝试ifconfig
-    if [ -z "$ip_address" ]; then
-        ip_address=$($IFCONFIG_CMD $INTERFACE 2>/dev/null | $GREP_CMD "inet addr" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f2)
-    fi
-
-    # 如果以上都未能获取到 IP，则使用默认占位符
-    [ -z "$ip_address" ] && ip_address="无法获取IP"
-    log "获取 IP: ip_address=$ip_address"
+    while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
+        INTERFACE=$($IP_CMD link | $GREP_CMD "state UP" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f1 | $GREP_CMD -E "wlan|eth" | $HEAD_CMD -n 1)
+        [ -z "$INTERFACE" ] && INTERFACE="wlan0"
+        ip_address=$($IP_CMD addr show $INTERFACE | $GREP_CMD "inet " | $AWK_CMD '{print $2}' | $CUT_CMD -d/ -f1)
+        if [ -z "$ip_address" ]; then
+            ip_address=$($IFCONFIG_CMD $INTERFACE 2>/dev/null | $GREP_CMD "inet addr" | $AWK_CMD '{print $2}' | $CUT_CMD -d: -f2)
+        fi
+        if [ -n "$ip_address" ] && [ "$ip_address" != "无法获取IP" ]; then
+            log "成功获取 IP: ip_address=$ip_address (尝试次数: $((RETRY_COUNT + 1)))"
+            echo "$ip_address"
+            return 0
+        fi
+        log "未获取到有效 IP (尝试 $((RETRY_COUNT + 1))/$MAX_RETRY)，1秒后重试"
+        sleep 1
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    done
+    ip_address="无法获取IP"
+    log "错误: 获取 IP 超时，ip_address=$ip_address"
     echo "$ip_address"
 }
 
@@ -55,7 +64,6 @@ update_module_prop_running() {
     CURRENT_IP=$(get_lan_ip)
     log "更新 module.prop 运行状态，CURRENT_IP=$CURRENT_IP"
 
-    # 获取 openlist 的 PID
     pid=$(pgrep -f "$OPENLIST_BINARY server --data" 2>/dev/null | head -n 1)
     if [ -z "$pid" ]; then
         log "错误: 未找到运行中的 openlist"
@@ -63,28 +71,37 @@ update_module_prop_running() {
     else
         log "找到 Openlist PID: $pid"
 
-        # 尝试使用 ss 获取端口
-        port=$(ss -tulnp 2>/dev/null | grep "$pid" | awk '{print $5}' | cut -d':' -f2 | sort -u | head -n 1)
-        if [ -z "$port" ] && command -v netstat >/dev/null; then
-            port=$(netstat -tulnp 2>/dev/null | grep "$pid" | awk '{print $4}' | cut -d':' -f2 | sort -u | head -n 1)
-        fi
+        MAX_RETRY=30
+        RETRY_COUNT=0
+        port=""
 
-        # 检查初始密码文件
+        while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
+            port=$(ss -tulnp 2>/dev/null | grep "$pid" | awk '{print $5}' | cut -d':' -f2 | sort -u | head -n 1)
+            if [ -z "$port" ] && command -v netstat >/dev/null; then
+                port=$(netstat -tulnp 2>/dev/null | grep "$pid" | awk '{print $4}' | cut -d':' -f2 | sort -u | head -n 1)
+            fi
+            if [ -n "$port" ]; then
+                log "成功获取 Openlist 端口: $port (尝试次数: $((RETRY_COUNT + 1)))"
+                break
+            fi
+            log "未获取到 Openlist 端口 (PID: $pid, 尝试 $((RETRY_COUNT + 1))/$MAX_RETRY)，1秒后重试"
+            sleep 1
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+        done
+
         PASSWORD_TEXT=""
         if [ -f "${DATA_DIR}/初始密码.txt" ]; then
             PASSWORD_TEXT=" | 初始密码：$(cat "${DATA_DIR}/初始密码.txt")"
         fi
 
         if [ -n "$port" ]; then
-            log "找到 Openlist 端口: $port"
             NEW_DESC="description=【运行中】当前地址：http://${CURRENT_IP}:${port} | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
         else
-            log "警告: 未找到 openlist 的端口 (PID: $pid)"
+            log "错误: 获取 Openlist 端口超时 (PID: $pid)"
             NEW_DESC="description=【运行中】无法检测 openlist 端口，请检查日志 $LOG_FILE | 数据目录：${DATA_DIR} | 点击▲操作关闭程序${PASSWORD_TEXT}"
         fi
     fi
 
-    # 确保 module.prop 存在且可写
     if [ ! -f "$MODULE_PROP_FILE" ]; then
         log "错误: $MODULE_PROP_FILE 不存在"
         return 1
@@ -94,10 +111,7 @@ update_module_prop_running() {
         chmod 644 "$MODULE_PROP_FILE" 2>/dev/null || log "错误: 无法设置 $MODULE_PROP_FILE 的权限"
     fi
 
-    # 记录更新前的 module.prop 内容
     log "更新前的 module.prop 内容: $(cat "$MODULE_PROP_FILE" 2>/dev/null || echo '无法读取 module.prop')"
-
-    # 更新 description 字段
     grep -v '^description=' "$MODULE_PROP_FILE" > "${MODULE_PROP_FILE}.tmp" 2>/dev/null
     echo "$NEW_DESC" >> "${MODULE_PROP_FILE}.tmp"
     if mv "${MODULE_PROP_FILE}.tmp" "$MODULE_PROP_FILE" 2>/dev/null; then
@@ -106,10 +120,7 @@ update_module_prop_running() {
         log "错误: 更新 module.prop 失败"
     fi
 
-    # 清理备份文件
     rm -f "${MODULE_PROP_FILE}.bak" "${MODULE_PROP_FILE}.tmp.*" 2>/dev/null
-
-    # 检查 module.prop 是否包含非键值对行
     if grep -vE '^[a-zA-Z_]+=' "$MODULE_PROP_FILE" >/dev/null; then
         log "警告: module.prop 包含无效行，正在清理"
         grep -E '^[a-zA-Z_]+=' "$MODULE_PROP_FILE" > "${MODULE_PROP_FILE}.clean" 2>/dev/null
@@ -120,13 +131,11 @@ update_module_prop_running() {
 
 log "启动 service.sh 于 $(date '+%Y-%m-%d %H:%M:%S')"
 
-# 检查 ip 命令是否存在
 if ! command -v ip >/dev/null; then
     log "错误: 未找到 ip 命令"
     exit 1
 fi
 
-# 检查 openlist 二进制文件
 if [ "$OPENLIST_BINARY" = "TO_BE_REPLACED" ]; then
     log "错误: OPENLIST_BINARY 未在安装时配置"
     exit 1
@@ -143,15 +152,13 @@ if [ ! -x "$OPENLIST_BINARY" ]; then
     }
 fi
 
-# 检查 DATA_DIR 是否配置
 if [ "$DATA_DIR" = "TO_BE_REPLACED" ]; then
     log "错误: DATA_DIR 未在安装时配置"
     exit 1
 fi
 
-# 检查并创建数据目录
 mkdir -p "$DATA_DIR" 2>/dev/null
-if [ $? -ne 0 ]; then  # 如果返回值不为0（失败）
+if [ $? -ne 0 ]; then
     log "错误: 无法创建数据目录 $DATA_DIR"
     exit 1
 fi
@@ -164,7 +171,6 @@ if [ ! -w "$DATA_DIR" ]; then
 fi
 log "已创建或验证数据目录：$DATA_DIR"
 
-# 等待系统启动完成
 ELAPSED=0
 MAX_WAIT=60
 while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -181,18 +187,15 @@ if [ $ELAPSED -ge $MAX_WAIT ]; then
     log "警告: 系统启动超时，继续尝试启动 openlist"
 fi
 
-# 启动 openlist 服务
 log "启动 OpenList: $OPENLIST_BINARY server --data $DATA_DIR"
 $OPENLIST_BINARY server --data "$DATA_DIR" &
 OPENLIST_PID=$!
 
-# 检查 openlist 是否启动成功
 if ps -p $OPENLIST_PID >/dev/null || pgrep -f "$OPENLIST_BINARY server --data" >/dev/null; then
     log "OpenList 服务启动成功 (PID: $OPENLIST_PID)"
     update_module_prop_running
 else
     log "错误: 无法启动 OpenList 服务"
-    # 尝试手动运行以捕获错误
     OUTPUT=$($OPENLIST_BINARY server --data "$DATA_DIR" 2>&1)
     log "手动运行输出: $OUTPUT"
     exit 1
