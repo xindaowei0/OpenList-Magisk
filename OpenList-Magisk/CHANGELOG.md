@@ -46,5 +46,21 @@ vv4.0.2: Synced with OpenList official release vv4.0.2
 **Full Changelog**: https://github.com/OpenListTeam/OpenList/compare/v4.0.1...v4.0.2
 
 vv4.0.2: Synced with OpenList official release vv4.0.2
+## What's Changed
+* add dropbox api by @PIKACHUIM in https://github.com/OpenListTeam/OpenList/pull/295
+* 删除曲奇云盘驱动 by @eiauo in https://github.com/OpenListTeam/OpenList/pull/294
+* fixed(drive):Delete old Dropbox renewapi by @Suyunmeng in https://github.com/OpenListTeam/OpenList/pull/296
+* docs(README_cn): format document links as list to sync with other languages. by @Timer-u in https://github.com/OpenListTeam/OpenList/pull/279
+* fix(ci):fixed changelog ci by @Suyunmeng in https://github.com/OpenListTeam/OpenList/pull/302
+* fix(setting): update PDF and EPUB viewer URLs by @xixu-me in https://github.com/OpenListTeam/OpenList/pull/297
+
+## New Contributors
+* @eiauo made their first contribution in https://github.com/OpenListTeam/OpenList/pull/294
+* @Timer-u made their first contribution in https://github.com/OpenListTeam/OpenList/pull/279
+* @xixu-me made their first contribution in https://github.com/OpenListTeam/OpenList/pull/297
+
+**Full Changelog**: https://github.com/OpenListTeam/OpenList/compare/v4.0.1...v4.0.2
+
+vv4.0.2: Synced with OpenList official release vv4.0.2
 ## What's Changed\r\n* add dropbox api by @PIKACHUIM in https://github.com/OpenListTeam/OpenList/pull/295\r\n* 删除曲奇云盘驱动 by @eiauo in https://github.com/OpenListTeam/OpenList/pull/294\r\n* fixed(drive):Delete old Dropbox renewapi by @Suyunmeng in https://github.com/OpenListTeam/OpenList/pull/296\r\n* docs(README_cn): format document links as list to sync with other languages. by @Timer-u in https://github.com/OpenListTeam/OpenList/pull/279\r\n* fix(ci):fixed changelog ci by @Suyunmeng in https://github.com/OpenListTeam/OpenList/pull/302\r\n* fix(setting): update PDF and EPUB viewer URLs by @xixu-me in https://github.com/OpenListTeam/OpenList/pull/297\r\n\r\n## New Contributors\r\n* @eiauo made their first contribution in https://github.com/OpenListTeam/OpenList/pull/294\r\n* @Timer-u made their first contribution in https://github.com/OpenListTeam/OpenList/pull/279\r\n* @xixu-me made their first contribution in https://github.com/OpenListTeam/OpenList/pull/297\r\n\r\n**Full Changelog**: https://github.com/OpenListTeam/OpenList/compare/v4.0.1...v4.0.2
 
