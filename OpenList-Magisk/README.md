@@ -1,115 +1,102 @@
-# OpenList Magisk 模块安装指南
+# OpenList Magisk 模块
 
-本模块将 [OpenList](https://github.com/OpenListTeam/OpenList) 文件服务器集成到 Android 系统中，当前版本：v4.0.0。
+[![Release](https://img.shields.io/github/v/release/Alien-Et/OpenList-Magisk)](https://github.com/Alien-Et/OpenList-Magisk/releases)
+[![License](https://img.shields.io/github/license/Alien-Et/OpenList-Magisk)](https://github.com/Alien-Et/OpenList-Magisk/blob/main/LICENSE)
 
-## 功能
-- 自动同步 OpenList 官方版本
-- 支持 ARM 和 ARM64 架构
-- 首次启动生成随机管理员账号和密码，保存到 `/data/adb/modules/openlist-magisk/随机密码.txt`（格式为“账号：xxx”和“密码：xxx”）
-- 系统启动后自动运行 OpenList 服务，数据存储在模块的 `data` 目录（/data/adb/modules/openlist-magisk/data）
-- 通过 Magisk 的“动作”按钮切换 OpenList 服务状态
-- 仅在“运行中”状态下，module.prop 的 description 显示账号和密码
+OpenList Magisk 模块将 [OpenList](https://github.com/OpenListTeam/OpenList) 文件服务器集成到 Android 系统中，通过 Magisk 以系统化方式运行，支持 ARM 和 ARM64 架构。
 
-## 安装流程
-1. **准备工作**：
-   - 确保设备已安装 Magisk（建议 v28.0 或更高版本以支持动作按钮）。
-   - 设备已获得 Root 权限。
-   - 确保有网络连接以下载模块。
+## 功能亮点
 
-2. **下载模块**：
-   - 从 [GitHub Releases](https://github.com/Alien-Et/OpenList-Magisk/releases) 下载最新模块 ZIP 文件（例如：openlist-magisk-v4.0.0.zip）。
+- **灵活安装选项**：支持三种安装位置
+  - data/adb/openlist
+  - 模块目录/bin
+  - system/bin
+- **数据目录可选**：支持两种数据存储位置
+  - /data/adb/openlist/
+  - /storage/emulated/0/Android/openlist/
+- **密码定制**：提供初始密码设置选项
+- **动态服务管理**：通过 Magisk 的"动作"按钮一键控制服务
+- **智能网络适配**：自动识别 WiFi 和移动网络 IP
+- **日志支持**：详细的运行日志记录
 
-3. **安装模块**：
-   - 打开 Magisk 应用，进入“模块”选项卡。
-   - 点击“从本地安装”，选择下载的 ZIP 文件。
-   - 安装过程会显示：
-     - 设备架构（ARM 或 ARM64）。
-     - OpenList 二进制安装路径（/system/bin/openlist）。
-   - 安装完成后，重启设备以启动 OpenList 服务并生成初始密码。
+## 系统要求
 
-4. **验证安装**：
-   - 检查 `/data/adb/modules/openlist-magisk/随机密码.txt` 是否存在，格式为：
-     ```
-     账号：xxx
-     密码：xxx
-     ```
-   - 查看 `/data/adb/modules/openlist-magisk/module.prop`，在“运行中”状态下确认 description 包含：
-     ```
-     【运行中】局域网地址：http://<IP>:5244 项目地址：https://github.com/Alien-Et/OpenList-Magisk | 初始账号：xxx | 初始密码：xxx（仅未手动修改时有效）
-     ```
-   - 运行以下命令检查 OpenList 服务：
-     ```bash
-     openlist version
-     ```
-   - 访问 OpenList Web 界面（默认：http://localhost:5244，使用 `随机密码.txt` 中的账号和密码登录）。
+- Android 设备（支持 ARM 或 ARM64 架构）
+- Magisk v20.4 或更高版本
+- Root 权限
+
+## 安装步骤
+
+1. **下载模块**
+   - 从 [GitHub Releases](https://github.com/Alien-Et/OpenList-Magisk/releases) 下载最新版本
+
+2. **安装配置**
+   - 打开 Magisk 管理器
+   - 选择"从本地安装"
+   - 进入安装配置界面：
+     - 选择二进制文件安装位置
+     - 选择数据目录存储位置
+     - 选择是否修改默认密码为 admin
+
+3. **完成安装**
+   - 等待安装完成
+   - 重启设备
 
 ## 使用说明
-- **服务管理**：
-  - OpenList 服务在系统启动完成后自动运行（通过 service.sh），模块描述显示：
-    ```
-    【运行中】局域网地址：http://<设备IP>:5244 项目地址：https://github.com/Alien-Et/OpenList-Magisk | 初始账密请移步到"/data/adb/modules/openlist-magisk/随机密码.txt"查看
-    ```
-  - 在 Magisk 应用中点击“动作”按钮：
-    - 如果 OpenList 服务正在运行，点击停止服务，模块描述更新为：
-      ```
-      【已停止】请点击"操作"启动程序。项目地址：https://github.com/Alien-Et/OpenList-Magisk
-      ```
-    - 如果 OpenList 服务未运行，点击启动服务，模块描述恢复为“运行中”状态。
-- **数据目录**：OpenList 数据存储在 `/data/adb/modules/openlist-magisk/data`，覆盖安装不会重置密码（除非手动删除 随机密码.txt）。
-- **密码生成**：
-  - 首次安装并重启后，自动生成随机密码，保存到 `随机密码.txt`。
-  - 后续重启若 `随机密码.txt` 存在，则不修改密码；若不存在，则生成新密码。
-  - 密码格式：
-    ```
-    账号：admin
-    密码：xxxxxxxx
-    ```
-  - 初始账号和密码仅在“运行中”状态下显示在 module.prop 的 description 中，带备注“仅未手动修改时有效”。
-- **更新模块**：通过 Magisk 检查更新，或手动下载最新 ZIP 文件重新安装。
-- **卸载模块**：在 Magisk 中禁用或删除模块，重启设备（data 目录和 随机密码.txt 需手动清理）。
 
-## 常见问题
-- **Q: 无法访问 Web 界面？**
-  - 确保网络正常，尝试使用设备 IP 访问（http://<设备IP>:5244）。
-  - 检查服务状态：
-    ```bash
-    pgrep -f openlist
-    ```
-  - 手动启动服务：
-    ```bash
-    su -c /data/adb/modules/openlist-magisk/action.sh
-    ```
-- **Q: 密码丢失？**
-  - 查看 `/data/adb/modules/openlist-magisk/随机密码.txt` 或 module.prop 的 description（“运行中”状态）。
-  - 若 随机密码.txt 被删除，可重启设备重新生成密码。
-- **Q: 动作按钮无法停止服务？**
-  - 确保 Magisk 版本 >= v28.0。
-  - 手动检查：
-    ```bash
-    su -c pkill -f openlist
-    su -c /data/adb/modules/openlist-magisk/action.sh
-    ```
-- **Q: module.prop 未显示账号和密码？**
-  - 确认 OpenList 服务是否运行：
-    ```bash
-    pgrep -f openlist
-    ```
-  - 检查 `随机密码.txt` 内容和格式：
-    ```bash
-    cat /data/adb/modules/openlist-magisk/随机密码.txt
-    ```
-  - 查看日志：
-    ```bash
-    cat /data/adb/modules/openlist-magisk/service.log
-    ```
-  - 手动运行 service.sh：
-    ```bash
-    su -c /data/adb/modules/openlist-magisk/service.sh
-    ```
-  - 检查 module.prop：
-    ```bash
-    cat /data/adb/modules/openlist-magisk/module.prop
-    ```
+### 服务管理
+- 系统启动后自动运行
+- 通过 Magisk "动作"按钮控制服务
+- 服务状态显示在 module.prop：
+  - 运行中：显示访问地址和数据目录
+  - 已停止：显示启动提示
 
-## 更多信息
-访问 [项目主页](https://github.com/Alien-Et/OpenList-Magisk) 获取完整文档和更新日志。
+### 访问方式
+- Web 界面访问：`http://<设备IP>:5244`
+- 初始密码：查看数据目录下的 `初始密码.txt`
+
+### 数据存储
+- 默认数据目录：`/data/adb/openlist/`
+- 日志文件位置：与数据目录相同
+- 密码文件：`初始密码.txt`
+
+## 故障排除
+
+### 常见问题
+1. **无法访问服务**
+   - 检查网络连接
+   - 检查服务状态：`pgrep -f openlist`
+   - 查看日志文件
+   - 手动重启服务：`su -c /data/adb/modules/openlist/service.sh`
+
+2. **IP 地址获取失败**
+   - 确认 WiFi 或移动网络已连接
+   - 检查网络接口状态
+   - 查看模块日志
+
+3. **服务无法启动**
+   - 检查二进制文件权限
+   - 确认数据目录可写
+   - 查看详细日志
+
+### 手动操作
+- 停止服务：`su -c pkill -f openlist`
+- 启动服务：`su -c /data/adb/modules/openlist/service.sh`
+- 查看日志：`cat /data/adb/modules/openlist/service.log`
+
+## 更新说明
+- 支持通过 Magisk 更新检查
+- 更新不会清除现有数据
+- 可在安装时重新选择配置选项
+
+## 数据迁移说明
+1. 在安装时选择新的数据目录
+2. 手动将现有数据迁移到新目录
+3. 更新 config.json 中的相关路径
+
+## 贡献
+- 欢迎提交 Issue 和 Pull Request
+- 问题反馈：[GitHub Issues](https://github.com/Alien-Et/OpenList-Magisk/issues)
+
+## 许可证
+本项目基于 [MIT 许可证](LICENSE) 发布。
