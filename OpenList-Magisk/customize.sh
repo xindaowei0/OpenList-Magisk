@@ -40,9 +40,9 @@ show_binary_menu() {
     local current=$1
     ui_print " "
     ui_print "📂 选择安装位置"
-    ui_print "1、data/adb/openlist"
-    ui_print "2、模块目录/bin"
-    ui_print "3、system/bin"
+    ui_print "1、adb/openlist/bin"
+    ui_print "2、$MODDIR/bin"
+    ui_print "3、$MODDIR/system/bin"
     ui_print "━━━━━━━━━━━━━━━━━━━━━━"
     ui_print "音量+ 确认  |  音量- 切换"
     ui_print "━━━━━━━━━━━━━━━━━━━━━━"
@@ -220,12 +220,12 @@ if [ "$PASSWORD_OPTION" = "2" ]; then
             COMMAND_SUCCESS=$?
             ;;
         2) 
-            # 二进制文件在模块目录/bin/
+            # 二进制文件在$MODDIR/bin/
             "$MODPATH/bin/openlist" admin set admin --data "$DATA_DIR"
             COMMAND_SUCCESS=$?
             ;;
         3) 
-            # 二进制文件在 system/bin/
+            # 二进制文件在 $MODDIR/system/bin/
             "$MODPATH/system/bin/openlist" admin set admin --data "$DATA_DIR"
             COMMAND_SUCCESS=$?
             ;;
