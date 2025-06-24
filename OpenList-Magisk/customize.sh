@@ -6,8 +6,7 @@ ui_print "正在安装 OpenList Magisk 模块..."
 ARCH=$(getprop ro.product.cpu.abi)
 ui_print "检测到架构: $ARCH"
 
-# 定义模块路径和二进制文件名
-MODPATH=$MODPATH
+# 定义二进制文件名
 BINARY_NAME="openlist"
 
 # 按键检测函数
