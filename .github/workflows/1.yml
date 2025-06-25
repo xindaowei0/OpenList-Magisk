@@ -140,30 +140,6 @@ jobs:
           }
           EOF
 
-          # 更新 CHANGELOG.md
-          if [ -f OpenList-Magisk/CHANGELOG.md ]; then
-            # 保存用户自定义的头部内容
-            CUSTOM_HEADER=$(awk '/^# Changelog/{p=1} p==1 && /^v[0-9]+\.[0-9]+\.[0-9]+:/{exit} p' OpenList-Magisk/CHANGELOG.md)
-            # 获取现有的变更日志
-            OLD_LOGS=$(awk '/^v[0-9]+\.[0-9]+\.[0-9]+:/{p=1} p' OpenList-Magisk/CHANGELOG.md)
-            [ -z "$CUSTOM_HEADER" ] && CUSTOM_HEADER="# Changelog\n"
-          else
-            CUSTOM_HEADER="# Changelog\n"
-            OLD_LOGS=""
-          fi
-
-          # 写入新的 CHANGELOG.md
-          {
-            echo -e "$CUSTOM_HEADER"
-            echo
-            echo "v${{ env.OPENLIST_VERSION }}: Synced with OpenList official release v${{ env.OPENLIST_VERSION }}"
-            echo "${{ env.OPENLIST_CHANGELOG }}"
-            echo
-            if [ -n "$OLD_LOGS" ]; then
-              echo "$OLD_LOGS"
-            fi
-          } > OpenList-Magisk/CHANGELOG.md
-
           # 更新 module.prop
           if [ -f OpenList-Magisk/module.prop ]; then
             sed -i "s/^version=.*/version=${{ env.OPENLIST_VERSION }}/" OpenList-Magisk/module.prop
@@ -176,7 +152,7 @@ jobs:
           # 提交更改
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add update.json OpenList-Magisk/CHANGELOG.md OpenList-Magisk/module.prop
+          git add update.json OpenList-Magisk/module.prop
           git commit -m "更新模块到 OpenList ${{ env.OPENLIST_VERSION }}" || echo "无更改需要提交"
           git push origin main
 
