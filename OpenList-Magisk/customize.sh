@@ -120,15 +120,15 @@ INSTALL_OPTION=$?
 # 定义安装路径和service.sh中的路径
 case $INSTALL_OPTION in
     1) 
-        BINARY_PATH="/data/adb/openlist/bin/"
+        BINARY_PATH="/data/adb/openlist/bin"
         BINARY_SERVICE_PATH="/data/adb/openlist/bin/openlist"  # 绝对路径
         ;;
     2) 
-        BINARY_PATH="$MODPATH/bin/"
+        BINARY_PATH="$MODPATH/bin"
         BINARY_SERVICE_PATH="\$MODDIR/bin/openlist"  # 使用 MODDIR 变量
         ;;
     3) 
-        BINARY_PATH="$MODPATH/system/bin/"
+        BINARY_PATH="$MODPATH/system/bin"
         BINARY_SERVICE_PATH="\$MODDIR/system/bin/openlist"  # 使用 MODDIR 变量
         ;;
 esac
@@ -157,15 +157,15 @@ fi
 
 chmod 755 "$BINARY_PATH/$BINARY_NAME"
 
-[ "$BINARY_PATH" = "$MODPATH/system/bin/" ] && chcon -R u:object_r:system_file:s0 "$BINARY_PATH/$BINARY_NAME"
+[ "$BINARY_PATH" = "$MODPATH/system/bin" ] && chcon -R u:object_r:system_file:s0 "$BINARY_PATH/$BINARY_NAME"
 
 # 选择数据目录
 make_selection "data" "2"
 DATA_DIR_OPTION=$?
 
 case $DATA_DIR_OPTION in
-    1) DATA_DIR="/data/adb/openlist/" ;;
-    2) DATA_DIR="/sdcard/Android/openlist/" ;;
+    1) DATA_DIR="/data/adb/openlist" ;;
+    2) DATA_DIR="/sdcard/Android/openlist" ;;
 esac
 
 # 数据迁移提示
@@ -215,12 +215,12 @@ if [ "$PASSWORD_OPTION" = "2" ]; then
     COMMAND_SUCCESS=0
     case $INSTALL_OPTION in
         1) 
-            # 二进制文件在 /data/adb/openlist/bin/
+            # 二进制文件在 /data/adb/openlist/bin
             /data/adb/openlist/bin/openlist admin set admin --data "$DATA_DIR"
             COMMAND_SUCCESS=$?
             ;;
         2) 
-            # 二进制文件在$MODDIR/bin/
+            # 二进制文件在$MODDIR/bin
             "$MODPATH/bin/openlist" admin set admin --data "$DATA_DIR"
             COMMAND_SUCCESS=$?
             ;;
